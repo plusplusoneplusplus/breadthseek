@@ -1,62 +1,75 @@
-# CUDA Hello World
+# CUDA Particle Simulation
 
-A simple CUDA program that demonstrates printing from both the CPU and GPU.
+A GPU-accelerated 2D particle simulation using CUDA and SFML for visualization. The simulation features thousands of particles interacting with each other through gravity, collision, and repulsion forces.
 
-## Prerequisites
+## Features
 
-- NVIDIA CUDA Toolkit (https://developer.nvidia.com/cuda-downloads)
-- NVIDIA GPU with CUDA support
-- CMake (version 3.18 or later)
+- Real-time simulation of 10,000 particles
+- GPU-accelerated physics calculations
+- Particle-particle interactions
+- Elastic boundary collisions
+- Gravity and damping effects
+- SFML-based visualization
 
-## Building with CMake (Recommended)
+## Requirements
 
+- CUDA Toolkit (11.0 or later)
+- CMake (3.18 or later)
+- SFML (2.5 or later)
+- C++17 compatible compiler
+
+## Building the Project
+
+1. Create a build directory:
 ```bash
-# Create and enter build directory
-mkdir -p build
+mkdir build
 cd build
-
-# Configure
-cmake ..
-
-# Build
-cmake --build .
-
-# Run
-./bin/hello
 ```
 
-## Building with Makefile (Alternative)
+2. Configure with CMake:
+```bash
+cmake ..
+```
 
-To compile the program using the provided Makefile:
-
+3. Build the project:
 ```bash
 make
 ```
 
-Or manually compile with:
+## Running the Simulation
 
+After building, run the executable:
 ```bash
-nvcc -O2 -o hello hello.cu
+./particle_sim
 ```
 
-## Running (Makefile build)
+## Implementation Details
 
-After compilation with Makefile, run the program with:
+The simulation uses a Structure of Arrays (SoA) approach for better memory coalescing on the GPU. The main components are:
 
-```bash
-./hello
-```
+- `physics.cuh`: Header file containing particle system structure and function declarations
+- `physics.cu`: CUDA implementation of particle physics
+- `main.cpp`: Main application loop and visualization using SFML
 
-You should see output from both the CPU and multiple GPU threads.
+### Physics Implementation
 
-## Clean Up
+The simulation includes the following forces:
+- Gravity
+- Particle-particle repulsion
+- Boundary collisions with elastic reflection
+- Velocity damping
 
-For CMake build:
-```bash
-rm -rf build/
-```
+### Performance Optimization
 
-For Makefile build:
-```bash
-make clean
-``` 
+- Uses CUDA for parallel computation of particle forces and updates
+- Efficient memory layout with Structure of Arrays
+- Coalesced memory access patterns
+- Configurable block and grid sizes for optimal GPU utilization
+
+## Controls
+
+- Close window to exit the simulation
+
+## License
+
+This project is open source and available under the MIT License. 
