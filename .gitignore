@@ -89,3 +89,6 @@ htmlcov/
 *.code-workspace
 *.sublime-workspace
 *.sublime-project 
+
+# VectorDB
+.chroma_db/
