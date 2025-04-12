@@ -3,13 +3,24 @@ import torch
 import numpy as np
 
 # Configuration parameters
-EMBEDDING_CONFIG = {
+EMBEDDING_CONFIG_DEEPSEEK_CODER_V2_LITE_BASE = {
     "model_name": "deepseek-ai/DeepSeek-Coder-V2-Lite-Base",  # Model to use for embeddings
     "max_context_length": 128 * 1024,  # Maximum token length for input text
     "output_dim": None,  # Output embedding dimensionality (None = use model's default)
     "pooling_strategy": "mean",  # Options: "mean", "cls", "max"
     "normalize": True,  # Whether to L2-normalize the output embeddings
 }
+
+EMBDDING_CONFIG_QWEN25_CODER_7B = {
+    "model_name": "Qwen/Qwen2.5-Coder-7B-Instruct",
+    "max_context_length": 128 * 1024,
+    "output_dim": None,
+    "pooling_strategy": "mean",
+    "normalize": True,
+}
+
+# Configuration parameters
+EMBEDDING_CONFIG = EMBDDING_CONFIG_QWEN25_CODER_7B
 
 class CodeEmbeddings:
     def __init__(self, 
