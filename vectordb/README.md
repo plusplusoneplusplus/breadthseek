@@ -9,17 +9,22 @@ This project demonstrates how to use ChromaDB as a vector database with code-opt
 pip install -r requirements.txt
 ```
 
-2. Run the embedding model example to test it:
+2. If installation of flash-attn failed, try:
+```bash
+pip install flash-attn --no-build-isolation
+```
+
+3. Run the embedding model example to test it:
 ```bash
 python code_embeddings.py
 ```
 
-3. Run the vector database example:
+4. Run the vector database example:
 ```bash
 python vector_store_example.py
 ```
 
-4. For batch processing (useful with large collections):
+5. For batch processing (useful with large collections):
 ```bash
 # First uncomment the batch_process_example() line in vector_store_example.py
 python vector_store_example.py
