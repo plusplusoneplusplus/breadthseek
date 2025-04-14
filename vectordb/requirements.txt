@@ -1,7 +1,7 @@
-chromadb==1.0.4
-transformers==4.38.2
-torch==2.2.0
-sentence-transformers==2.5.0 
+chromadb
+transformers
+torch
+sentence-transformers
 psutil
 setuptools
-flash-attn==2.5.1
+flash-attn
