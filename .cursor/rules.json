@@ -1,0 +1,48 @@
+{
+  "rules": [
+    {
+      "name": "Use uv instead of pip",
+      "pattern": {
+        "regex": "pip (install|uninstall|freeze|list)",
+        "globPattern": "**/*.{py,md,sh,zsh,bash}"
+      },
+      "allowAuto": true,
+      "autoFixValue": "uv $1",
+      "message": "Use uv instead of pip for better performance and dependency resolution",
+      "severity": "warning"
+    },
+    {
+      "name": "Use uv pip with requirements.txt",
+      "pattern": {
+        "regex": "pip install -r ([^\\s]+)",
+        "globPattern": "**/*.{py,md,sh,zsh,bash}"
+      },
+      "allowAuto": true,
+      "autoFixValue": "uv pip install -r $1",
+      "message": "Use uv pip instead of pip for better performance with requirements files",
+      "severity": "warning"
+    },
+    {
+      "name": "Use uv with editable installs",
+      "pattern": {
+        "regex": "pip install -e ([^\\s]+)",
+        "globPattern": "**/*.{py,md,sh,zsh,bash}"
+      },
+      "allowAuto": true,
+      "autoFixValue": "uv pip install -e $1",
+      "message": "Use uv pip instead of pip for better performance with editable installs",
+      "severity": "warning"
+    },
+    {
+      "name": "Always install with --no-build-isolation when using uv",
+      "pattern": {
+        "regex": "uv pip install -e \\. (?!--no-build-isolation)",
+        "globPattern": "**/*.{py,md,sh,zsh,bash}"
+      },
+      "allowAuto": true,
+      "autoFixValue": "uv pip install -e . --no-build-isolation",
+      "message": "When using uv with this project, add --no-build-isolation for faster builds",
+      "severity": "warning"
+    }
+  ]
+} 

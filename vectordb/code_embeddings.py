@@ -1,6 +1,11 @@
 from transformers import AutoTokenizer, AutoModel
 import torch
 import numpy as np
+import os
+import pandas as pd
+import git
+from pathlib import Path
+from tqdm import tqdm
 
 # Configuration parameters
 EMBEDDING_CONFIG_DEEPSEEK_CODER_V2_LITE_BASE = {
@@ -27,8 +32,8 @@ EMBEDDING_CONFIG_PHI4 = {
     "normalize": True,
 }
 
-# Configuration parameters
-EMBEDDING_CONFIG = EMBEDDING_CONFIG_PHI4
+# Default configuration 
+EMBEDDING_CONFIG = EMBEDDING_CONFIG_QWEN25_CODER_7B
 
 class CodeEmbeddings:
     def __init__(self, 
@@ -132,44 +137,135 @@ class CodeEmbeddings:
         # Convert to numpy array
         return embeddings.cpu().numpy()
 
-# Example usage
-if __name__ == "__main__":
-    # Initialize the embedding model
-    embedding_model = CodeEmbeddings(device="cpu")
-    
-    # Generate embeddings for some C++ code snippets
-    cpp_code_snippets = [
-        """// Recursive Fibonacci implementation in C++
-int fibonacci(int n) {
-    if (n <= 1)
-        return n;
-    return fibonacci(n-1) + fibonacci(n-2);
-}""",
-
-        """// Simple loop example in C++
-#include <iostream>
-int main() {
-    for (int i = 0; i < 10; i++) {
-        std::cout << i << std::endl;
-    }
-    return 0;
-}""",
-
-        """// Node class implementation in C++
-class Node {
-private:
-    int value;
-    Node* next;
-public:
-    Node(int val) : value(val), next(nullptr) {}
-    void setNext(Node* node) { next = node; }
-    Node* getNext() const { return next; }
-    int getValue() const { return value; }
-};"""
-    ]
-    
-    embeddings = embedding_model(cpp_code_snippets)
-    
-    # Print embedding dimensions
-    print(f"Embedding shape: {embeddings.shape}")
-    print(f"First embedding sample: {embeddings[0][:10]}")  # Show first 10 dimensions of first embedding 
+    def process_git_repo(self, repo_path, output_dir=None, batch_size=10, 
+                         file_extensions=None, exclude_dirs=None):
+        """
+        Generate embeddings for all tracked files in a git repository.
+        
+        Args:
+            repo_path (str): Path to the git repository
+            output_dir (str, optional): Directory to save the output parquet files.
+                                      If None, will use repo_path/embeddings
+            batch_size (int): Number of files to process in a single batch
+            file_extensions (list, optional): List of file extensions to include
+                                            If None, all files will be processed
+            exclude_dirs (list, optional): List of directories to exclude (relative to repo)
+        
+        Returns:
+            dict: Directory paths to the output parquet files
+        """
+        # Set defaults
+        if file_extensions is None:
+            file_extensions = ['.py', '.java', '.js', '.ts', '.c', '.cpp', '.h', '.hpp', '.go', '.rs', '.rb', '.php']
+        
+        if exclude_dirs is None:
+            exclude_dirs = ['.git', 'node_modules', 'venv', 'dist', 'build', '__pycache__']
+        
+        if output_dir is None:
+            output_dir = os.path.join(repo_path, "embeddings")
+        
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Initialize git repo
+        repo = git.Repo(repo_path)
+        repo_root = Path(repo_path)
+        
+        print("Scanning repository for tracked files...")
+        # Get all tracked files
+        tracked_files = []
+        for item in tqdm(repo.index.entries.items(), desc="Scanning git index"):
+            file_path = os.path.join(repo_path, item[0][0].decode('utf-8'))
+            
+            # Check if file exists and is not in excluded directories
+            if not os.path.exists(file_path):
+                continue
+                
+            # Check if file is in excluded directories
+            rel_path = os.path.relpath(file_path, repo_path)
+            if any(rel_path.startswith(exclude_dir) for exclude_dir in exclude_dirs):
+                continue
+                
+            # Check file extension
+            _, ext = os.path.splitext(file_path)
+            if ext not in file_extensions:
+                continue
+                
+            tracked_files.append(file_path)
+            
+        print(f"Found {len(tracked_files)} tracked files with specified extensions")
+        
+        # Group files by directory
+        files_by_dir = {}
+        for file_path in tracked_files:
+            dir_path = os.path.dirname(file_path)
+            if dir_path not in files_by_dir:
+                files_by_dir[dir_path] = []
+            files_by_dir[dir_path].append(file_path)
+        
+        output_files = {}
+        
+        # Process each directory
+        for dir_path, files in tqdm(files_by_dir.items(), desc="Processing directories"):
+            rel_dir = os.path.relpath(dir_path, repo_path)
+            dir_tqdm = tqdm(total=len(files), desc=f"Files in {rel_dir}", leave=False)
+            
+            all_embeddings = []
+            
+            # Process files in batches
+            for i in range(0, len(files), batch_size):
+                batch = files[i:i+batch_size]
+                
+                # Read file contents
+                file_contents = []
+                valid_files = []
+                
+                for file_path in batch:
+                    try:
+                        with open(file_path, "r", encoding="utf-8") as f:
+                            content = f.read()
+                            file_contents.append(content)
+                            valid_files.append(file_path)
+                    except Exception as e:
+                        print(f"Error reading {file_path}: {e}")
+                        continue
+                
+                if not file_contents:
+                    dir_tqdm.update(len(batch))
+                    continue
+                    
+                # Generate embeddings
+                batch_embeddings = self(file_contents)
+                
+                # Store results
+                for j, file_path in enumerate(valid_files):
+                    rel_path = os.path.relpath(file_path, repo_path)
+                    embedding = batch_embeddings[j]
+                    
+                    all_embeddings.append({
+                        "file_path": rel_path,
+                        "embedding": embedding
+                    })
+                
+                dir_tqdm.update(len(batch))
+            
+            dir_tqdm.close()
+            
+            if all_embeddings:
+                # Create output directory if needed
+                output_subdir = os.path.join(output_dir, rel_dir)
+                os.makedirs(output_subdir, exist_ok=True)
+                
+                # Create DataFrame
+                df = pd.DataFrame([{
+                    "file_path": item["file_path"],
+                    "embedding": item["embedding"]
+                } for item in all_embeddings])
+                
+                # Save to parquet
+                output_file = os.path.join(output_subdir, "embeddings.parquet")
+                df.to_parquet(output_file)
+                
+                output_files[rel_dir] = output_file
+                print(f"Saved embeddings for {len(all_embeddings)} files in {rel_dir}")
+            
+        return output_files 
