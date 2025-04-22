@@ -1,7 +1,0 @@
-chromadb
-transformers
-torch
-sentence-transformers
-psutil
-setuptools
-flash-attn

@@ -1,0 +1,21 @@
+[project]
+name = "breadthseek-vectordb"
+version = "0.1.0"
+description = "Vector Database Example with ChromaDB and Code Embeddings for C++"
+requires-python = ">=3.12"
+dependencies = [
+    "chromadb",
+    "transformers",
+    "torch",
+    "sentence-transformers",
+    "psutil",
+    "setuptools",
+    "flash-attn",
+]
+
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["vectordb"] 

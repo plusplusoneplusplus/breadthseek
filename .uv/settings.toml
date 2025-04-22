@@ -1,0 +1,7 @@
+[uv]
+# Enable native uv resolver and installer
+use-build-cache = true
+
+[python]
+# Default interpreter to use
+default-version = "3.12" 

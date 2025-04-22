@@ -4,25 +4,45 @@ This project demonstrates how to use ChromaDB as a vector database with code-opt
 
 ## Setup
 
-1. Install the required dependencies:
+1. Install dependencies using uv (recommended):
 ```bash
-pip install -r requirements.txt
+# Install uv if you haven't already
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# Or with pip
+pip install uv
+
+# Create and activate virtual environment
+uv venv
+source .venv/bin/activate  # On Unix/macOS
+# OR
+.venv\Scripts\activate     # On Windows
+
+# Install torch first (required for flash-attn build)
+uv pip install torch
+
+# Install dependencies with build isolation disabled
+uv pip install -e . --no-build-isolation
+```
+
+Alternatively, you can still use pip:
+```bash
+pip install -r vectordb/requirements.txt
 ```
 
 2. Run the embedding model example to test it:
 ```bash
-python code_embeddings.py
+python vectordb/code_embeddings.py
 ```
 
 3. Run the vector database example:
 ```bash
-python vector_store_example.py
+python vectordb/vector_store_example.py
 ```
 
 4. For batch processing (useful with large collections):
 ```bash
 # First uncomment the batch_process_example() line in vector_store_example.py
-python vector_store_example.py
+python vectordb/vector_store_example.py
 ```
 
 ## Features
