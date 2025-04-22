@@ -11,7 +11,7 @@ EMBEDDING_CONFIG_DEEPSEEK_CODER_V2_LITE_BASE = {
     "normalize": True,  # Whether to L2-normalize the output embeddings
 }
 
-EMBDDING_CONFIG_QWEN25_CODER_7B = {
+EMBEDDING_CONFIG_QWEN25_CODER_7B = {
     "model_name": "Qwen/Qwen2.5-Coder-7B-Instruct",
     "max_context_length": 128 * 1024,
     "output_dim": None,
@@ -19,8 +19,16 @@ EMBDDING_CONFIG_QWEN25_CODER_7B = {
     "normalize": True,
 }
 
+EMBEDDING_CONFIG_PHI4 = {
+    "model_name": "microsoft/phi-4",
+    "max_context_length": 16 * 1024,  # Phi-4 has a 16K token context length
+    "output_dim": None,
+    "pooling_strategy": "mean",
+    "normalize": True,
+}
+
 # Configuration parameters
-EMBEDDING_CONFIG = EMBDDING_CONFIG_QWEN25_CODER_7B
+EMBEDDING_CONFIG = EMBEDDING_CONFIG_PHI4
 
 class CodeEmbeddings:
     def __init__(self, 
@@ -127,7 +135,7 @@ class CodeEmbeddings:
 # Example usage
 if __name__ == "__main__":
     # Initialize the embedding model
-    embedding_model = CodeEmbeddings()
+    embedding_model = CodeEmbeddings(device="cpu")
     
     # Generate embeddings for some C++ code snippets
     cpp_code_snippets = [
