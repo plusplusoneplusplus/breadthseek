@@ -138,7 +138,7 @@ class CodeEmbeddings:
         return embeddings.cpu().numpy()
 
     def process_git_repo(self, repo_path, output_dir=None, batch_size=10, 
-                         file_extensions=None, exclude_dirs=None):
+                         file_extensions=None, exclude_dirs=None, subdir=None):
         """
         Generate embeddings for all tracked files in a git repository.
         
@@ -150,6 +150,7 @@ class CodeEmbeddings:
             file_extensions (list, optional): List of file extensions to include
                                             If None, all files will be processed
             exclude_dirs (list, optional): List of directories to exclude (relative to repo)
+            subdir (str, optional): Only process files within this subdirectory of the repository
         
         Returns:
             dict: Directory paths to the output parquet files
@@ -170,14 +171,31 @@ class CodeEmbeddings:
         repo = git.Repo(repo_path)
         repo_root = Path(repo_path)
         
+        # Set the subdirectory path if provided
+        subdir_path = None
+        if subdir:
+            subdir_path = os.path.normpath(subdir)
+            if not os.path.isabs(subdir_path):
+                subdir_path = os.path.join(repo_path, subdir_path)
+            
+            # Verify the subdirectory exists
+            if not os.path.isdir(subdir_path):
+                raise ValueError(f"Specified subdirectory '{subdir}' does not exist in the repository")
+            
+            print(f"Only processing files within subdirectory: {subdir}")
+        
         print("Scanning repository for tracked files...")
         # Get all tracked files
         tracked_files = []
         for item in tqdm(repo.index.entries.items(), desc="Scanning git index"):
-            file_path = os.path.join(repo_path, item[0][0].decode('utf-8'))
+            file_path = os.path.join(repo_path, item[0][0])
             
             # Check if file exists and is not in excluded directories
             if not os.path.exists(file_path):
+                continue
+            
+            # Check if file is within the specified subdirectory
+            if subdir_path and not file_path.startswith(subdir_path):
                 continue
                 
             # Check if file is in excluded directories
