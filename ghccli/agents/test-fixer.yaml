@@ -1,0 +1,36 @@
+# Test Fixer Agent Configuration
+name: test-fixer
+description: autonomous agent for fixing failing test cases
+methods: []
+
+# Available agents that this agent can invoke
+availableAgents: []
+
+metadata:
+  supportsStreaming: false
+  supportsTools: true
+  requiresWorkspace: true
+  supportsPromptSelection: false
+  
+  languageModel:
+    preferred: gpt-4.1
+  
+  promptSupport:
+    supportsPrompts: true
+    supportsTsxMessages: false
+    promptParameterName: prompt
+  
+  toolPreferences:
+    allowedToolRegex:
+      - ".*"  # Test fixer agent can use all tools for autonomous operation
+  
+  specialization: autonomous-test-fixer
+  
+  executionConfig:
+    maxRounds: 100
+    maxContextTokens: 32000
+    maxToolCalls: 1000
+
+systemPrompt:
+  type: file
+  value: test-fixer-prompt.md

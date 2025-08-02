@@ -1,0 +1,11 @@
+{
+  "selectedAuthType": "github-copilot",
+  "theme": "Default",
+  "selectedModel": "gpt-4.1",
+  "mcpServers": {
+    "sse": {
+      "url": "http://0.0.0.0:8000/sse"
+    }
+  },
+  "selectedAgent": "worker"
+}
