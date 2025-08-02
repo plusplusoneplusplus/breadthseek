@@ -17,6 +17,12 @@ env/
 venv/
 ENV/
 
+# Python build artifacts
+*.egg-info/
+
+# uv lock files
+**/uv.lock
+
 # macOS
 .DS_Store
 .AppleDouble
