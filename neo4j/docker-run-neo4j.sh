@@ -12,7 +12,7 @@ docker pull neo4j:5.20.0-enterprise
 docker run -d \
   --name neo4j-vector \
   -p7474:7474 -p7687:7687 \
-  -e NEO4J_AUTH=neo4j/test \
+  -e NEO4J_AUTH=neo4j/testtest \
   -e NEO4J_ACCEPT_LICENSE_AGREEMENT=yes \
   -e NEO4J_PLUGINS='["apoc"]' \
   -e NEO4J_server.memory.heap.initial_size=2G \
@@ -21,4 +21,4 @@ docker run -d \
   -e NEO4J_dbms.security.procedures.allowlist=apoc.* \
   neo4j:5.20.0-enterprise
 
-echo "Neo4j is running at http://localhost:7474 (user: neo4j, pass: test)"
+echo "Neo4j is running at http://localhost:7474 (user: neo4j, pass: testtest)"

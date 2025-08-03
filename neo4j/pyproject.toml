@@ -4,5 +4,6 @@ version = "0.1.0"
 description = "Neo4j client utilities for breadthseek."
 requires-python = ">=3.12"
 dependencies = [
-    "neo4j"
+    "neo4j",
+    "numpy"
 ]
