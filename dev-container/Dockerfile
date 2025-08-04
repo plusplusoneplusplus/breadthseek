@@ -25,6 +25,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   jq \
   nano \
   vim \
+  python3 \
+  python3-pip \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Ensure default node user has access to /usr/local/share
@@ -41,6 +43,9 @@ RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhisto
 
 # Set `DEVCONTAINER` environment variable to help with orientation
 ENV DEVCONTAINER=true
+
+# Install uv (Python package manager)
+RUN curl -Ls https://astral.sh/uv/install.sh | sh
 
 # Create workspace and config directories and set permissions
 RUN mkdir -p /workspace /home/node/.claude && \
