@@ -6,6 +6,16 @@ import pandas as pd
 import git
 from pathlib import Path
 from tqdm import tqdm
+from typing import Optional, List, Dict, Any
+
+# Try to import llama-cpp-python for GGUF support
+try:
+    from llama_cpp import Llama
+    LLAMA_CPP_AVAILABLE = True
+except ImportError:
+    LLAMA_CPP_AVAILABLE = False
+    print("Warning: llama-cpp-python not installed. GGUF models will not be available.")
+    print("Install with: pip install llama-cpp-python")
 
 # Configuration parameters
 EMBEDDING_CONFIG_DEEPSEEK_CODER_V2_LITE_BASE = {
@@ -32,6 +42,19 @@ EMBEDDING_CONFIG_PHI4 = {
     "normalize": True,
 }
 
+EMBEDDING_CONFIG_NOMIC_EMBED_CODE_GGUF = {
+    "model_name": "nomic-embed-code.Q6_K.gguf",  # GGUF model file name
+    "model_type": "gguf",  # Indicate this is a GGUF model
+    "model_url": "https://huggingface.co/nomic-ai/nomic-embed-code-GGUF/resolve/main/nomic-embed-code.Q6_K.gguf",
+    "max_context_length": 8192,  # Nomic embed code context length
+    "output_dim": 768,  # Nomic embed code output dimension
+    "pooling_strategy": "mean",  # GGUF models typically use mean pooling for embeddings
+    "normalize": True,
+    "n_ctx": 8192,  # Context window for llama.cpp
+    "n_gpu_layers": -1,  # Use all available GPU layers (-1 for all)
+    "embedding": True,  # Enable embedding mode for llama.cpp
+}
+
 # Default configuration 
 EMBEDDING_CONFIG = EMBEDDING_CONFIG_QWEN25_CODER_7B
 
@@ -39,9 +62,19 @@ class CodeEmbeddings:
     def __init__(self, 
                  model_name=EMBEDDING_CONFIG["model_name"], 
                  device=None, 
-                 output_dim=EMBEDDING_CONFIG["output_dim"],
-                 pooling_strategy=EMBEDDING_CONFIG["pooling_strategy"],
-                 normalize=EMBEDDING_CONFIG["normalize"]):
+                 output_dim=EMBEDDING_CONFIG.get("output_dim"),
+                 pooling_strategy=EMBEDDING_CONFIG.get("pooling_strategy", "mean"),
+                 normalize=EMBEDDING_CONFIG.get("normalize", True),
+                 model_type=EMBEDDING_CONFIG.get("model_type", "transformer"),
+                 model_config=None):
+        self.model_type = model_type
+        self.model_name = model_name
+        self.pooling_strategy = pooling_strategy
+        self.normalize = normalize
+        self.model_config = model_config or EMBEDDING_CONFIG
+        self.max_length = self.model_config.get("max_context_length", 8192)
+        self.output_dim = output_dim
+        
         # Automatically determine the device to use
         if device is None:
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -49,15 +82,59 @@ class CodeEmbeddings:
             self.device = device
             
         print(f"Using device: {self.device}")
+        print(f"Model type: {self.model_type}")
         
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModel.from_pretrained(model_name)
+        if self.model_type == "gguf":
+            self._init_gguf_model()
+        else:
+            self._init_transformer_model()
+    
+    def _init_gguf_model(self):
+        """Initialize a GGUF model using llama-cpp-python."""
+        if not LLAMA_CPP_AVAILABLE:
+            raise ImportError("llama-cpp-python is required for GGUF models. Install with: pip install llama-cpp-python")
+        
+        # Check if model file exists locally
+        model_path = self.model_name
+        if not os.path.exists(model_path):
+            # Try to find it in a models directory
+            models_dir = os.path.join(os.path.dirname(__file__), "models")
+            model_path = os.path.join(models_dir, self.model_name)
+            
+            if not os.path.exists(model_path):
+                print(f"Model file {self.model_name} not found locally.")
+                print(f"Please download from: {self.model_config.get('model_url', '')}")
+                print(f"And place it in: {models_dir}")
+                raise FileNotFoundError(f"GGUF model file not found: {self.model_name}")
+        
+        # Initialize the GGUF model
+        n_gpu_layers = self.model_config.get("n_gpu_layers", -1) if self.device == "cuda" else 0
+        
+        self.model = Llama(
+            model_path=model_path,
+            n_ctx=self.model_config.get("n_ctx", 8192),
+            n_gpu_layers=n_gpu_layers,
+            embedding=True,  # Enable embedding mode
+            verbose=False
+        )
+        
+        # Set output dimension from config
+        if self.output_dim is None:
+            self.output_dim = self.model_config.get("output_dim", 768)
+        
+        print(f"GGUF model loaded: {model_path}")
+        print(f"Embedding dimension: {self.output_dim}")
+        
+        # GGUF models don't need tokenizer or projection
+        self.tokenizer = None
+        self.projection = None
+    
+    def _init_transformer_model(self):
+        """Initialize a transformer model using HuggingFace transformers."""
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self.model = AutoModel.from_pretrained(self.model_name)
         self.model.to(self.device)
         self.model.eval()
-        self.max_length = EMBEDDING_CONFIG["max_context_length"]
-        self.output_dim = output_dim
-        self.pooling_strategy = pooling_strategy
-        self.normalize = normalize
         
         # Get the default embedding dimension from the model
         if self.output_dim is None:
@@ -75,8 +152,8 @@ class CodeEmbeddings:
         
         # Initialize projection layer if we need a specific output dimension
         # different from the model's default
-        if output_dim is not None and hasattr(self.model.config, "hidden_size") and output_dim != self.model.config.hidden_size:
-            self.projection = torch.nn.Linear(self.model.config.hidden_size, output_dim).to(self.device)
+        if self.output_dim is not None and hasattr(self.model.config, "hidden_size") and self.output_dim != self.model.config.hidden_size:
+            self.projection = torch.nn.Linear(self.model.config.hidden_size, self.output_dim).to(self.device)
         else:
             self.projection = None
 
@@ -103,6 +180,50 @@ class CodeEmbeddings:
         if isinstance(texts, str):
             texts = [texts]
 
+        if self.model_type == "gguf":
+            return self._embed_gguf(texts)
+        else:
+            return self._embed_transformer(texts)
+    
+    def _embed_gguf(self, texts: List[str]) -> np.ndarray:
+        """Generate embeddings using a GGUF model."""
+        all_embeddings = []
+        
+        for text in texts:
+            # Truncate text if necessary (character-based for GGUF)
+            # Approximate max characters based on typical tokenization
+            max_chars = self.max_length * 4  # Rough approximation
+            if len(text) > max_chars:
+                text = text[:max_chars]
+            
+            # Get embeddings from GGUF model
+            embedding_result = self.model.embed(text)
+            
+            # Extract embedding vector
+            if isinstance(embedding_result, list):
+                embedding = np.array(embedding_result)
+            else:
+                embedding = np.array(embedding_result)
+            
+            # Ensure correct shape
+            if len(embedding.shape) == 1:
+                embedding = embedding.reshape(1, -1)
+            
+            all_embeddings.append(embedding)
+        
+        # Stack all embeddings
+        embeddings = np.vstack(all_embeddings)
+        
+        # Normalize if requested
+        if self.normalize:
+            # L2 normalization
+            norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+            embeddings = embeddings / (norms + 1e-9)
+        
+        return embeddings
+    
+    def _embed_transformer(self, texts: List[str]) -> np.ndarray:
+        """Generate embeddings using a transformer model."""
         # Tokenize the texts
         encoded_input = self.tokenizer(
             texts,
@@ -286,4 +407,35 @@ class CodeEmbeddings:
                 output_files[rel_dir] = output_file
                 print(f"Saved embeddings for {len(all_embeddings)} files in {rel_dir}")
             
-        return output_files 
+        return output_files
+
+
+def create_nomic_embed_code(model_path: Optional[str] = None, device: Optional[str] = None) -> CodeEmbeddings:
+    """
+    Convenience function to create a CodeEmbeddings instance with Nomic Embed Code GGUF model.
+    
+    Args:
+        model_path (str, optional): Path to the GGUF model file. If None, will look for
+                                   'nomic-embed-code.Q6_K.gguf' in the models directory.
+        device (str, optional): Device to use ('cuda' or 'cpu'). If None, auto-detect.
+    
+    Returns:
+        CodeEmbeddings: Instance configured for Nomic Embed Code
+    
+    Example:
+        >>> embedder = create_nomic_embed_code()
+        >>> embeddings = embedder(["def hello():\n    print('Hello, world!')"])
+    """
+    config = EMBEDDING_CONFIG_NOMIC_EMBED_CODE_GGUF.copy()
+    if model_path:
+        config["model_name"] = model_path
+    
+    return CodeEmbeddings(
+        model_name=config["model_name"],
+        device=device,
+        output_dim=config["output_dim"],
+        pooling_strategy=config["pooling_strategy"],
+        normalize=config["normalize"],
+        model_type=config["model_type"],
+        model_config=config
+    )

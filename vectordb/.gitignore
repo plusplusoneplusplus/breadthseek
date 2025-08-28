@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Models directory (contains large binary files)
+models/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+.coverage
+.pytest_cache/
+.tox/
+
+# Package manager
+uv.lock
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+chroma_db/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

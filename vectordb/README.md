@@ -15,9 +15,12 @@ BreadthSeek Vector Database consists of two main components:
 
 - Generates embeddings for all tracked files in a git repository
 - Supports multiple embedding models:
-  - Qwen/Qwen2.5-Coder-7B-Instruct (default)
-  - deepseek-ai/DeepSeek-Coder-V2-Lite-Base
-  - microsoft/phi-4
+  - **Transformer Models (via HuggingFace):**
+    - Qwen/Qwen2.5-Coder-7B-Instruct (default, 128K context)
+    - deepseek-ai/DeepSeek-Coder-V2-Lite-Base (128K context)
+    - microsoft/phi-4 (16K context)
+  - **GGUF Models (via llama-cpp-python):**
+    - Nomic Embed Code (8K context, optimized for code)
 - Organizes embeddings by directory
 - Stores embeddings in parquet format for efficient storage and retrieval
 - Command-line interface for easy use
@@ -39,6 +42,7 @@ This will:
 #### Advanced Options
 
 ```bash
+# Using transformer models
 python -m vectordb.repo_processor --repo /path/to/your/repository \
                                  --output /custom/output/path \
                                  --batch-size 20 \
@@ -46,6 +50,12 @@ python -m vectordb.repo_processor --repo /path/to/your/repository \
                                  --model deepseek \
                                  --extensions py,js,ts \
                                  --exclude-dirs node_modules,dist
+
+# Using Nomic GGUF model
+python -m vectordb.repo_processor --repo /path/to/your/repository \
+                                 --model nomic \
+                                 --model-path ./nomic-embed-code.Q6_K.gguf \
+                                 --device cuda
 ```
 
 #### Command Line Arguments
@@ -54,10 +64,11 @@ python -m vectordb.repo_processor --repo /path/to/your/repository \
 - `--output`: Output directory for embeddings (default: `<repo_path>/embeddings/`)
 - `--batch-size`: Number of files to process in a single batch (default: 10)
 - `--device`: Device to use for inference (cuda or cpu, default: auto-detect)
-- `--model`: Embedding model to use (qwen, deepseek, phi4, default: qwen)
+- `--model`: Embedding model to use (qwen, deepseek, phi4, nomic, default: qwen)
+- `--model-path`: Path to model file (required for GGUF models like nomic)
 - `--extensions`: Comma-separated list of file extensions to include (default: common code file extensions)
 - `--exclude-dirs`: Comma-separated list of directories to exclude (default: common build/dependency directories)
-- `--example`: Run with example code snippets instead of processing a repo
+- `--subdir`: Only process files within this subdirectory of the repository
 
 #### Output Structure
 
@@ -83,10 +94,16 @@ Each parquet file contains:
 You can also use the embedding functionality in your own Python code:
 
 ```python
-from vectordb.code_embeddings import CodeEmbeddings
+from vectordb.code_embeddings import CodeEmbeddings, create_nomic_embed_code
 
-# Initialize the embedding model
+# Using transformer models
 embedding_model = CodeEmbeddings(device="cuda")
+
+# Using Nomic GGUF model
+nomic_embedder = create_nomic_embed_code(
+    model_path="./nomic-embed-code.Q6_K.gguf",
+    device="cuda"
+)
 
 # Generate embeddings for a code snippet
 code = """
@@ -94,6 +111,7 @@ def hello_world():
     print("Hello, world!")
 """
 embeddings = embedding_model(code)
+nomic_embeddings = nomic_embedder(code)
 
 # Process a git repository
 output_files = embedding_model.process_git_repo(
@@ -172,6 +190,7 @@ All dependencies are specified in the `pyproject.toml` file:
 - sentence-transformers
 - psutil
 - flash-attn
+- llama-cpp-python (optional, required for GGUF models)
 
 ### Installation Options
 
@@ -183,6 +202,12 @@ pip install -e .
 
 # Install with development dependencies
 pip install -e ".[dev]"
+
+# Install llama-cpp-python for GGUF model support (optional)
+pip install llama-cpp-python
+
+# For GPU support with GGUF models
+CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python
 ```
 
 #### Using uv (recommended for faster installation)
@@ -204,7 +229,40 @@ uv pip install torch
 
 # Install dependencies with build isolation disabled
 uv pip install -e . --no-build-isolation
+
+# Install llama-cpp-python for GGUF support (optional)
+uv pip install llama-cpp-python
 ```
+
+### Setting up Nomic Embed Code GGUF Model
+
+To use the Nomic Embed Code GGUF model:
+
+1. **Install llama-cpp-python:**
+   ```bash
+   pip install llama-cpp-python
+   # Or for GPU support:
+   CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python
+   ```
+
+2. **Download the model:**
+   ```bash
+   # Create models directory
+   mkdir -p vectordb/models
+   
+   # Download the quantized model (Q6_K variant, ~500MB)
+   wget -P vectordb/models https://huggingface.co/nomic-ai/nomic-embed-code-GGUF/resolve/main/nomic-embed-code.Q6_K.gguf
+   ```
+
+3. **Use the model:**
+   ```bash
+   python -m vectordb.repo_processor --repo /path/to/repo --model nomic
+   ```
+
+   Or specify a custom path:
+   ```bash
+   python -m vectordb.repo_processor --repo /path/to/repo --model nomic --model-path /path/to/nomic-embed-code.Q6_K.gguf
+   ```
 
 ## Project Structure
 
@@ -222,9 +280,20 @@ Run the test suite to validate the embedding functionality:
 pytest
 ```
 
+## Model Comparison
+
+| Model | Type | Context Length | Embedding Dim | Size | Best For |
+|-------|------|----------------|---------------|------|----------|
+| Qwen2.5-Coder-7B | Transformer | 128K | Variable | ~14GB | Large codebases, high accuracy |
+| DeepSeek-Coder-V2-Lite | Transformer | 128K | Variable | ~3GB | Balance of speed and accuracy |
+| Phi-4 | Transformer | 16K | Variable | ~14GB | General purpose code |
+| Nomic Embed Code | GGUF | 8K | 768 | ~500MB | Fast inference, code-specific |
+
 ## Notes
 
 - The vector store data will be saved in the `./vector_store` directory
-- The embedding model is downloaded automatically from Hugging Face the first time it's used
+- Transformer models are downloaded automatically from Hugging Face the first time they're used
+- GGUF models must be downloaded manually (see setup instructions)
 - The embedding dimensionality is determined by the model
-- For large codebases, the batch processing example demonstrates how to handle many documents efficiently 
+- For large codebases, the batch processing example demonstrates how to handle many documents efficiently
+- Nomic Embed Code is specifically optimized for code and provides fast inference with a small model size 
