@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Symlink local ./agents and ./commands directories into ~/.claude/{agents,commands}
+# Symlink local .claude directory to ~/.claude
 
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [options]
 
 Options:
-  -f, --force     Replace existing directories/symlinks in ~/.claude
+  -f, --force     Replace existing ~/.claude directory/symlink
   -n, --dry-run   Print actions without making changes
   -h, --help      Show this help
 EOF
@@ -26,11 +26,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-local_agents="$repo_root/agents"
-local_commands="$repo_root/commands"
-claude_dir="${HOME}/.claude"
-target_agents="$claude_dir/agents"
-target_commands="$claude_dir/commands"
+local_claude="$repo_root"
+target_claude="${HOME}/.claude"
 
 run() { if [[ $dryrun -eq 1 ]]; then echo "DRY-RUN: $*"; else eval "$*"; fi; }
 
@@ -68,13 +65,10 @@ link_directory() {
   run "ln -s \"$src\" \"$dest\""
 }
 
-# Ensure local and parent directories exist
-mkdirp "$local_agents"
-mkdirp "$local_commands"
-mkdirp "$claude_dir"
+# Ensure parent directory exists
+mkdirp "$(dirname "$target_claude")"
 
-echo "Linking directories:"
-link_directory "$local_agents" "$target_agents"
-link_directory "$local_commands" "$target_commands"
+echo "Linking directory:"
+link_directory "$local_claude" "$target_claude"
 
 echo "Done."

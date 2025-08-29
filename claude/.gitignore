@@ -1,0 +1,12 @@
+# Ignore everything except specific files and directories
+*
+
+# Track these files and directories
+!agents/
+!agents/**
+!commands/
+!commands/**
+!link_claude.sh
+!settings.json
+!statusline-enhanced.sh
+!.gitignore
