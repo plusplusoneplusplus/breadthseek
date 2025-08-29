@@ -7,5 +7,6 @@
   "statusLine": {
     "type": "command",
     "command": "bash ~/.claude/statusline-enhanced.sh"
-  }
+  },
+  "instructions": "NEVER proactively create documentation files (*.md), README files, or example files. Only create documentation, README, or example files if explicitly requested by the user."
 }
