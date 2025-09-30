@@ -1,0 +1,1 @@
+[project]\nname = "rl-tictactoe"\nversion = "0.1.0"\nrequires-python = ">=3.10"\n\n[project.optional-dependencies]\ndev = [\n  "pytest",\n  "ruff",\n  "mypy",\n  "ipykernel"\n]\n\n[tool.ruff]\nline-length = 100\n\n[tool.mypy]\npython_version = "3.10"\nstrict = true\nwarn_unused_ignores = true\nwarn_return_any = true\n\n[tool.pytest.ini_options]\naddopts = "-q"\n
