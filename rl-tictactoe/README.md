@@ -146,7 +146,7 @@ Resources: Sutton and Barto (chapters on tabular methods), David Silver RL lectu
 
 ## Deliverables checklist
 
-- [ ] `TicTacToeEnv` with tests for win and draw and legality
+- [x] `TicTacToeEnv` with tests for win and draw and legality (100% test coverage!)
 - [ ] `RandomAgent`, `HeuristicAgent` (and optional `MinimaxAgent`)
 - [ ] `QLearningAgent` with training loops
 - [ ] Evaluation script: fixed seeds, summary metrics
