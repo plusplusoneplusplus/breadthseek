@@ -1,0 +1,41 @@
+# Task 1: Project Setup and Structure
+id: fsd-project-setup
+description: |
+  Set up the basic FSD project structure and development environment.
+  
+  Create the core directory structure for the FSD system:
+  - fsd/ (main package directory)
+  - fsd/cli/ (command-line interface)
+  - fsd/core/ (core orchestration logic)
+  - fsd/agents/ (Claude CLI agent wrapper)
+  - fsd/tracking/ (activity tracking system)
+  - fsd/config/ (configuration management)
+  - tests/ (test suite)
+  
+  Set up the Python package with:
+  - pyproject.toml with dependencies (click for CLI, pydantic for config, etc.)
+  - Basic __init__.py files
+  - Development dependencies (pytest, ruff, mypy)
+  - Pre-commit hooks for code quality
+  
+  Make sure to use uv for package management as per project standards.
+
+priority: high
+estimated_duration: 1h
+
+success_criteria: |
+  - Clean project structure is created
+  - pyproject.toml is properly configured
+  - All directories have appropriate __init__.py files
+  - Development tools are set up (linting, testing)
+  - Can run `uv sync` successfully
+
+focus_files:
+  - "fsd/"
+  - "pyproject.toml"
+  - "tests/"
+
+on_completion:
+  create_pr: true
+  pr_title: "feat: Initial FSD project structure and setup"
+  notify_slack: false

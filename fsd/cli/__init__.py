@@ -1,0 +1,1 @@
+"""FSD command-line interface."""

@@ -1,0 +1,164 @@
+# FSD Task Schema Definition
+# Natural language task definitions for autonomous overnight coding
+
+task_schema_version: "2.0"
+
+# Example Task: Simple Bug Fix (Natural Language)
+example_simple:
+  id: fix-auth-bug-123
+  
+  # Natural language description - this is what gets passed to claude
+  description: |
+    Fix the authentication token expiration bug. Users are getting logged out 
+    too early and the token refresh isn't working properly. 
+    
+    The issue seems to be in the auth/token_manager.py file. Make sure users 
+    stay authenticated for 24 hours and that token refresh works correctly.
+    
+    Don't break the existing API and make sure all auth tests pass.
+  
+  priority: high  # low, medium, high, critical
+  estimated_duration: 2h
+
+  # Optional: Additional context or constraints
+  context: |
+    - The auth system uses JWT tokens
+    - Token expiration is currently set to 1 hour but should be 24 hours
+    - There's a refresh endpoint at /auth/refresh
+    - Tests are in tests/test_auth.py
+  
+  # Optional: Files to focus on (if known)
+  focus_files:
+    - "auth/token_manager.py"
+    - "tests/test_auth.py"
+  
+  # Success criteria (natural language)
+  success_criteria: |
+    - Users stay logged in for 24 hours
+    - Token refresh works without issues
+    - All existing auth tests pass
+    - No API breaking changes
+
+  # What to do when done (optional)
+  on_completion:
+    create_pr: true
+    pr_title: "fix: Resolve authentication token expiration bug"
+    notify_slack: true
+
+---
+
+# Example Task: Feature Implementation (Natural Language)
+example_feature:
+  id: user-settings-page
+  
+  description: |
+    Create a user settings page where users can manage their account. 
+    
+    The page should allow users to:
+    - Update their profile information (name, email, bio)
+    - Change their password (requiring current password for security)
+    - Manage email notification preferences 
+    - Delete their account (with confirmation dialog)
+    
+    Use the existing UserService for database operations and follow the same 
+    auth patterns we use elsewhere for password changes. You can reuse the 
+    EmailPreference component from the notifications section.
+    
+    Make sure to add tests for all UI components and aim for >80% coverage 
+    on the API endpoints.
+  
+  priority: medium
+  estimated_duration: 6h
+
+  on_completion:
+    create_pr: true
+    pr_title: "feat: Add user settings page"
+    notify_slack: true
+
+---
+
+# Example Task: Refactoring (Natural Language)
+example_refactor:
+  id: refactor-database-layer
+  
+  description: |
+    Refactor the database layer to use async/await instead of synchronous calls.
+    
+    Go through all the Python files in the db/ directory (but skip db/migrations/) 
+    and convert the database operations to use async/await patterns.
+    
+    Make sure to:
+    - Convert all database calls to async
+    - Update function signatures to be async
+    - Add proper await keywords
+    - Update any calling code that needs to be async too
+    - Keep all type hints correct
+    - Don't break any existing functionality
+    
+    Work incrementally - maybe do 5 files at a time and test after each batch.
+    Run the full test suite after everything to make sure there's no performance 
+    regression.
+  
+  priority: low
+  estimated_duration: 8h
+
+  focus_files:
+    - "db/**/*.py"
+    - "!db/migrations/**"  # Exclude migrations
+  
+  on_completion:
+    create_pr: true
+    pr_title: "refactor: Convert database layer to async/await"
+
+---
+
+# Example Task: Dependency Update (Natural Language)
+example_dependency:
+  id: update-dependencies-q4
+  
+  description: |
+    Update all the project dependencies to their latest versions.
+    
+    First check what's outdated with `uv pip list --outdated`, then:
+    1. Start with safe updates (patch and minor versions) and test everything
+    2. Then try major version updates one by one, testing after each
+    3. If a major update breaks something, skip it and continue with the others
+    4. Generate a report of what was updated and what failed
+    
+    Make sure all tests pass after each batch of updates.
+  
+  priority: medium
+  estimated_duration: 4h
+  
+  on_completion:
+    create_pr: true
+    pr_title: "chore: Update dependencies Q4 2025"
+
+---
+
+# Simplified Schema Reference
+
+# Required fields:
+# - id: Unique task identifier (e.g., "fix-auth-bug-123")
+# - description: Natural language description of what to do
+# - priority: low | medium | high | critical
+# - estimated_duration: Time estimate (e.g., "2h", "30m")
+
+# Optional fields:
+# - context: Additional background information
+# - focus_files: Array of file patterns to focus on
+# - success_criteria: Natural language success criteria
+# - on_completion: Simple completion actions
+#   - create_pr: true/false
+#   - pr_title: "Title for the PR"
+#   - notify_slack: true/false
+
+# The description field is passed directly to:
+# claude --dangerously-skip-permissions -p "${description}"
+
+# Example minimal task:
+simple_task_example:
+  id: fix-typo-in-readme
+  description: "Fix the typo in README.md where it says 'instalation' instead of 'installation'"
+  priority: low
+  estimated_duration: 5m

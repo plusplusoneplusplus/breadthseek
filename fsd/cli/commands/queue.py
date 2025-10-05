@@ -1,0 +1,298 @@
+"""FSD queue commands."""
+
+from pathlib import Path
+from typing import List, Dict, Any
+import json
+
+import click
+import yaml
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+
+from fsd.core.task_schema import TaskDefinition, load_task_from_yaml
+
+console = Console()
+
+
+@click.group()
+def queue_group() -> None:
+    """Manage the task queue.
+
+    Commands for listing, starting, stopping, and managing queued tasks.
+    """
+    pass
+
+
+@queue_group.command("list")
+@click.option(
+    "--status",
+    "-s",
+    type=click.Choice(["all", "queued", "running", "completed", "failed"]),
+    default="all",
+    help="Filter tasks by status",
+)
+def list_command(status: str) -> None:
+    """List tasks in the queue.
+
+    Shows all tasks with their current status, priority, and estimated duration.
+
+    Examples:
+        fsd queue list              # List all tasks
+        fsd queue list --status queued  # Only queued tasks
+        fsd queue list -s running   # Only running tasks
+    """
+    try:
+        tasks = _get_all_tasks()
+
+        if not tasks:
+            console.print("[yellow]No tasks found[/yellow]")
+            console.print("Use 'fsd submit' to add tasks to the queue")
+            return
+
+        # Filter by status if requested
+        if status != "all":
+            tasks = [t for t in tasks if t.get("status", "queued") == status]
+
+        if not tasks:
+            console.print(f"[yellow]No {status} tasks found[/yellow]")
+            return
+
+        # Create table
+        table = Table(title="Task Queue")
+        table.add_column("ID", style="cyan", no_wrap=True)
+        table.add_column("Priority", style="magenta")
+        table.add_column("Duration", style="green")
+        table.add_column("Status", style="yellow")
+        table.add_column("Description", style="white")
+
+        for task_info in tasks:
+            task_status = task_info.get("status", "queued")
+            description = task_info["task"].description
+
+            # Truncate long descriptions
+            if len(description) > 50:
+                description = description[:47] + "..."
+
+            # Color code status
+            status_color = {
+                "queued": "[blue]queued[/blue]",
+                "running": "[yellow]running[/yellow]",
+                "completed": "[green]completed[/green]",
+                "failed": "[red]failed[/red]",
+            }.get(task_status, task_status)
+
+            table.add_row(
+                task_info["task"].id,
+                task_info["task"].priority.value,
+                task_info["task"].estimated_duration,
+                status_color,
+                description,
+            )
+
+        console.print(table)
+
+    except Exception as e:
+        console.print(f"[red]Failed to list tasks:[/red] {e}")
+        raise click.ClickException(f"Failed to list tasks: {e}")
+
+
+@queue_group.command("start")
+@click.option(
+    "--mode",
+    "-m",
+    type=click.Choice(["interactive", "autonomous", "overnight"]),
+    default="interactive",
+    help="Execution mode",
+)
+@click.option("--task-id", "-t", help="Execute specific task only")
+def start_command(mode: str, task_id: str) -> None:
+    """Start task execution.
+
+    Begins processing tasks in the queue according to their priority
+    and dependencies.
+
+    Examples:
+        fsd queue start                     # Interactive mode
+        fsd queue start --mode autonomous   # Autonomous mode
+        fsd queue start --mode overnight    # Overnight mode
+        fsd queue start --task-id my-task   # Execute specific task
+    """
+    try:
+        fsd_dir = Path.cwd() / ".fsd"
+        if not fsd_dir.exists():
+            raise click.ClickException("FSD not initialized. Run 'fsd init' first.")
+
+        tasks = _get_queued_tasks()
+
+        if not tasks:
+            console.print("[yellow]No queued tasks found[/yellow]")
+            return
+
+        if task_id:
+            # Execute specific task
+            task_found = False
+            for task_info in tasks:
+                if task_info["task"].id == task_id:
+                    task_found = True
+                    console.print(f"[blue]Executing task:[/blue] {task_id}")
+                    _execute_task(task_info["task"], mode)
+                    break
+
+            if not task_found:
+                raise click.ClickException(f"Task '{task_id}' not found in queue")
+        else:
+            # Execute all queued tasks
+            console.print(f"[blue]Starting execution in {mode} mode[/blue]")
+            console.print(f"[dim]Found {len(tasks)} queued task(s)[/dim]")
+
+            for task_info in tasks:
+                console.print(f"\n[blue]Executing:[/blue] {task_info['task'].id}")
+                _execute_task(task_info["task"], mode)
+
+        console.print("\n[green]✓[/green] Execution completed")
+
+    except Exception as e:
+        console.print(f"[red]Execution failed:[/red] {e}")
+        raise click.ClickException(f"Execution failed: {e}")
+
+
+@queue_group.command("clear")
+@click.option(
+    "--status",
+    "-s",
+    type=click.Choice(["all", "completed", "failed"]),
+    default="completed",
+    help="Clear tasks with specific status",
+)
+@click.confirmation_option(prompt="Are you sure you want to clear tasks?")
+def clear_command(status: str) -> None:
+    """Clear tasks from the queue.
+
+    Removes completed or failed tasks to clean up the queue.
+
+    Examples:
+        fsd queue clear                 # Clear completed tasks
+        fsd queue clear --status all    # Clear all tasks
+        fsd queue clear --status failed # Clear only failed tasks
+    """
+    try:
+        fsd_dir = Path.cwd() / ".fsd"
+        queue_dir = fsd_dir / "queue"
+
+        if not queue_dir.exists():
+            console.print("[yellow]No queue directory found[/yellow]")
+            return
+
+        cleared_count = 0
+
+        for task_file in queue_dir.glob("*.yaml"):
+            task_status = _get_task_status(task_file.stem)
+
+            should_clear = (
+                status == "all"
+                or (status == "completed" and task_status == "completed")
+                or (status == "failed" and task_status == "failed")
+            )
+
+            if should_clear:
+                task_file.unlink()
+                cleared_count += 1
+
+        console.print(f"[green]✓[/green] Cleared {cleared_count} task(s)")
+
+    except Exception as e:
+        console.print(f"[red]Failed to clear tasks:[/red] {e}")
+        raise click.ClickException(f"Failed to clear tasks: {e}")
+
+
+def _get_all_tasks() -> List[Dict[str, Any]]:
+    """Get all tasks with their status."""
+    fsd_dir = Path.cwd() / ".fsd"
+    queue_dir = fsd_dir / "queue"
+
+    if not queue_dir.exists():
+        return []
+
+    tasks = []
+
+    for task_file in queue_dir.glob("*.yaml"):
+        try:
+            task = load_task_from_yaml(task_file)
+            status = _get_task_status(task.id)
+
+            tasks.append({"task": task, "status": status, "file": task_file})
+        except Exception as e:
+            console.print(f"[red]Warning: Failed to load {task_file}: {e}[/red]")
+
+    # Sort by priority and creation time
+    priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    tasks.sort(
+        key=lambda t: (
+            priority_order.get(t["task"].priority.value, 99),
+            t["file"].stat().st_mtime,
+        )
+    )
+
+    return tasks
+
+
+def _get_queued_tasks() -> List[Dict[str, Any]]:
+    """Get only queued tasks."""
+    all_tasks = _get_all_tasks()
+    return [t for t in all_tasks if t["status"] == "queued"]
+
+
+def _get_task_status(task_id: str) -> str:
+    """Get the current status of a task."""
+    fsd_dir = Path.cwd() / ".fsd"
+    status_file = fsd_dir / "status" / f"{task_id}.json"
+
+    if not status_file.exists():
+        return "queued"
+
+    try:
+        with open(status_file, "r", encoding="utf-8") as f:
+            status_data = json.load(f)
+        return status_data.get("status", "queued")
+    except Exception:
+        return "queued"
+
+
+def _execute_task(task: TaskDefinition, mode: str) -> None:
+    """Execute a single task (placeholder implementation)."""
+    # For now, this is a placeholder that simulates task execution
+    console.print(f"[dim]Mode:[/dim] {mode}")
+    console.print(f"[dim]Priority:[/dim] {task.priority.value}")
+    console.print(f"[dim]Duration:[/dim] {task.estimated_duration}")
+
+    # Create status directory
+    fsd_dir = Path.cwd() / ".fsd"
+    status_dir = fsd_dir / "status"
+    status_dir.mkdir(exist_ok=True)
+
+    # Update task status to running
+    _update_task_status(task.id, "running")
+
+    console.print("[yellow]Task execution not yet implemented[/yellow]")
+    console.print("This will be implemented in the next phase")
+
+    # For now, mark as completed
+    _update_task_status(task.id, "completed")
+
+
+def _update_task_status(task_id: str, status: str) -> None:
+    """Update the status of a task."""
+    fsd_dir = Path.cwd() / ".fsd"
+    status_dir = fsd_dir / "status"
+    status_dir.mkdir(exist_ok=True)
+
+    status_file = status_dir / f"{task_id}.json"
+
+    status_data = {
+        "status": status,
+        "updated_at": "2025-01-04T12:00:00Z",  # Placeholder timestamp
+    }
+
+    with open(status_file, "w", encoding="utf-8") as f:
+        json.dump(status_data, f, indent=2)
