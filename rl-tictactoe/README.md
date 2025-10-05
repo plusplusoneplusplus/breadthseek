@@ -148,10 +148,10 @@ Resources: Sutton and Barto (chapters on tabular methods), David Silver RL lectu
 
 - [x] `TicTacToeEnv` with tests for win and draw and legality (100% test coverage!)
 - [x] `RandomAgent`, `HeuristicAgent`, and `MinimaxAgent` (with memoization)
-- [ ] `QLearningAgent` with training loops
+- [x] `QLearningAgent` with training loops and epsilon/alpha decay
 - [x] Evaluation script: fixed seeds, summary metrics
-- [ ] Plots: win, draw, loss vs training steps
-- [ ] Saved artifacts: best policy, logs, configs
+- [x] Plots: win, draw, loss vs training steps (matplotlib visualizations)
+- [x] Saved artifacts: Q-tables, learning curves, trained models
 
 ## Proposed module structure (you will add these as you implement)
 
