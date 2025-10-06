@@ -1,7 +1,8 @@
 """FSD submit command."""
 
+import re
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple, List
 
 import click
 import yaml
@@ -24,28 +25,34 @@ console = Console()
 )
 @click.option("--interactive", "-i", is_flag=True, help="Create task interactively")
 @click.option("--dry-run", "-n", is_flag=True, help="Validate task without submitting")
-def submit_command(task_file: Optional[Path], interactive: bool, dry_run: bool) -> None:
+@click.option("--text", "-t", "task_text", type=str, help="Create task from natural language text")
+def submit_command(task_file: Optional[Path], interactive: bool, dry_run: bool, task_text: Optional[str]) -> None:
     """Submit a task for execution.
 
-    You can either provide a YAML task file or use --interactive mode
-    to create a task through a guided wizard.
+    You can either provide a YAML task file, use --interactive mode,
+    or use --text to create a task from natural language.
 
     Examples:
         fsd submit task.yaml        # Submit from file
         fsd submit --interactive    # Interactive creation
+        fsd submit --text "HIGH priority: Fix login bug in auth.py. Should take 30m"
         fsd submit task.yaml --dry-run  # Validate only
     """
-    if interactive and task_file:
-        raise click.ClickException("Cannot use both task file and --interactive mode")
+    # Validate mutually exclusive options
+    options_count = sum([bool(task_file), interactive, bool(task_text)])
+    if options_count > 1:
+        raise click.ClickException("Cannot use multiple input methods simultaneously")
 
-    if not interactive and not task_file:
+    if options_count == 0:
         raise click.ClickException(
-            "Must provide either a task file or use --interactive mode"
+            "Must provide either a task file, use --interactive mode, or use --text"
         )
 
     try:
         if interactive:
             task = _create_task_interactively()
+        elif task_text:
+            task = _create_task_from_text(task_text)
         else:
             task = load_task_from_yaml(task_file)
 
@@ -183,3 +190,236 @@ def _submit_task(task: TaskDefinition) -> None:
     task_dict = task.model_dump(exclude_none=True, mode="json")
     with open(task_file, "w", encoding="utf-8") as f:
         yaml.dump(task_dict, f, default_flow_style=False, indent=2)
+
+
+def _create_task_from_text(text: str) -> TaskDefinition:
+    """Create a task from natural language text.
+
+    Parses text to extract:
+    - Priority (HIGH, MEDIUM, LOW, CRITICAL keywords)
+    - Duration (e.g., "30m", "2h", "1h30m")
+    - Focus files (file paths mentioned)
+    - Core description
+
+    Args:
+        text: Natural language task description
+
+    Returns:
+        TaskDefinition created from parsed text
+
+    Examples:
+        "HIGH priority: Fix login bug in auth.py. Should take 30m"
+        "Refactor the payment module. Takes 2h. Files: payment.py, utils.py"
+        "CRITICAL: Database migration issue. 1h"
+    """
+    # Extract priority
+    priority, text_without_priority = _extract_priority(text)
+
+    # Extract duration
+    duration, text_without_duration = _extract_duration(text_without_priority)
+
+    # Extract focus files
+    focus_files, clean_description = _extract_focus_files(text_without_duration)
+
+    # Generate task ID from description
+    task_id = _generate_task_id(clean_description)
+
+    # Build task
+    task = TaskDefinition(
+        id=task_id,
+        description=clean_description.strip(),
+        priority=priority,
+        estimated_duration=duration,
+        focus_files=focus_files if focus_files else None,
+        on_completion=CompletionActions(
+            create_pr=True,
+            pr_title=_generate_pr_title(clean_description)
+        )
+    )
+
+    return task
+
+
+def _extract_priority(text: str) -> Tuple[Priority, str]:
+    """Extract priority from text.
+
+    Args:
+        text: Input text
+
+    Returns:
+        Tuple of (priority, text with priority removed)
+    """
+    text_upper = text.upper()
+
+    # Check for priority keywords
+    priority_patterns = [
+        (r'\b(CRITICAL|CRIT)\b[:\s]?', Priority.CRITICAL),
+        (r'\b(HIGH|URGENT)\b[:\s]?', Priority.HIGH),
+        (r'\b(MEDIUM|MED|NORMAL)\b[:\s]?', Priority.MEDIUM),
+        (r'\b(LOW)\b[:\s]?', Priority.LOW),
+    ]
+
+    for pattern, priority in priority_patterns:
+        match = re.search(pattern, text_upper)
+        if match:
+            # Remove priority keyword from text
+            text = text[:match.start()] + text[match.end():]
+            return priority, text.strip()
+
+    # Default to medium priority
+    return Priority.MEDIUM, text
+
+
+def _extract_duration(text: str) -> Tuple[str, str]:
+    """Extract duration from text.
+
+    Args:
+        text: Input text
+
+    Returns:
+        Tuple of (duration string, text with duration removed)
+    """
+    # Patterns for duration: "30m", "2h", "1h30m", "takes 2h", "should take 30m"
+    duration_patterns = [
+        r'\b(?:takes?|should take|needs?|requires?)\s+(\d+h(?:\d+m)?|\d+m)\b',
+        r'\b(\d+h(?:\d+m)?|\d+m)\b',
+    ]
+
+    for pattern in duration_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            duration = match.group(1) if match.lastindex else match.group(0)
+            # Clean up duration to just the time part
+            duration = re.search(r'(\d+h(?:\d+m)?|\d+m)', duration).group(1)
+            # Remove duration from text
+            text = text[:match.start()] + text[match.end():]
+            return duration.lower(), text.strip()
+
+    # Default duration estimation based on text length
+    return _estimate_duration(text), text
+
+
+def _estimate_duration(text: str) -> str:
+    """Estimate duration based on text complexity.
+
+    Args:
+        text: Task description
+
+    Returns:
+        Estimated duration string
+    """
+    word_count = len(text.split())
+
+    # Simple heuristic based on word count and keywords
+    keywords_long = ['implement', 'refactor', 'migrate', 'design', 'architecture']
+    keywords_short = ['fix', 'update', 'change', 'add']
+
+    text_lower = text.lower()
+
+    if any(keyword in text_lower for keyword in keywords_long) or word_count > 30:
+        return "2h"
+    elif any(keyword in text_lower for keyword in keywords_short) or word_count > 15:
+        return "1h"
+    else:
+        return "30m"
+
+
+def _extract_focus_files(text: str) -> Tuple[Optional[List[str]], str]:
+    """Extract file paths from text.
+
+    Args:
+        text: Input text
+
+    Returns:
+        Tuple of (list of file paths or None, text with files removed)
+    """
+    # Pattern for files: explicit "files:" or common extensions
+    files = []
+
+    # Check for explicit "files:" mentions
+    files_pattern = r'(?:files?)\s*[:\s]\s*([a-zA-Z0-9_/\-.,\s]+\.(?:py|js|ts|tsx|jsx|java|go|rs|yaml|yml|json|md)(?:\s*,\s*[a-zA-Z0-9_/\-]+\.(?:py|js|ts|tsx|jsx|java|go|rs|yaml|yml|json|md))*)'
+    match = re.search(files_pattern, text, re.IGNORECASE)
+
+    if match:
+        files_str = match.group(1)
+        # Split by comma and clean up
+        files = [f.strip() for f in re.split(r'[,\s]+', files_str) if '.' in f]
+        # Remove from text
+        text = text[:match.start()] + text[match.end():]
+    else:
+        # Look for file mentions with common extensions (but keep them in description)
+        file_pattern = r'\b([a-zA-Z0-9_/\-]+\.(?:py|js|ts|tsx|jsx|java|go|rs|yaml|yml|json|md))\b'
+        matches = re.finditer(file_pattern, text)
+
+        for match in matches:
+            files.append(match.group(1))
+
+        # Don't remove file mentions from text - they're part of the description
+        # Just clean up extra spaces
+        text = re.sub(r'\s+', ' ', text)
+
+    return files if files else None, text.strip()
+
+
+def _generate_task_id(description: str) -> str:
+    """Generate a task ID from description.
+
+    Args:
+        description: Task description
+
+    Returns:
+        Generated task ID (lowercase, hyphens, max 50 chars)
+    """
+    # Take first significant words (up to 5)
+    words = re.findall(r'\b[a-zA-Z]+\b', description.lower())
+
+    # Filter out common words
+    stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
+    significant_words = [w for w in words if w not in stop_words][:5]
+
+    # Join with hyphens
+    task_id = '-'.join(significant_words)
+
+    # Ensure minimum length
+    if len(task_id) < 3:
+        task_id = 'task-' + task_id
+
+    # Truncate if too long
+    if len(task_id) > 50:
+        task_id = task_id[:50].rstrip('-')
+
+    return task_id
+
+
+def _generate_pr_title(description: str) -> str:
+    """Generate a PR title from description.
+
+    Args:
+        description: Task description
+
+    Returns:
+        PR title (max 72 chars)
+    """
+    # Take first sentence or first 60 chars
+    first_sentence = description.split('.')[0].strip()
+
+    # Detect conventional commit type
+    text_lower = first_sentence.lower()
+    if 'fix' in text_lower or 'bug' in text_lower:
+        prefix = "fix: "
+    elif 'refactor' in text_lower:
+        prefix = "refactor: "
+    elif 'test' in text_lower:
+        prefix = "test: "
+    elif 'doc' in text_lower:
+        prefix = "docs: "
+    else:
+        prefix = "feat: "
+
+    title = prefix + first_sentence
+
+    # Truncate if too long
+    if len(title) > 72:
+        title = title[:69] + "..."
+
+    return title

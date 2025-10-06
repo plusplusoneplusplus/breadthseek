@@ -143,4 +143,59 @@ class TestCLI:
                 cli, ["submit", temp_file.name, "--interactive"]
             )
             assert result.exit_code != 0
-            assert "Cannot use both task file and --interactive mode" in result.output
+            assert "Cannot use multiple input methods simultaneously" in result.output
+
+    def test_submit_with_text_basic(self):
+        """Test submit command with --text option (basic)."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("fsd.cli.commands.submit.Path.cwd", return_value=Path(temp_dir)):
+                # Create .fsd directory first
+                fsd_dir = Path(temp_dir) / ".fsd"
+                fsd_dir.mkdir()
+
+                result = self.runner.invoke(
+                    cli,
+                    ["submit", "--text", "Fix login bug in auth.py", "--dry-run"],
+                )
+
+                if result.exit_code != 0:
+                    print(f"Error output: {result.output}")
+                    print(f"Exception: {result.exception}")
+
+                assert result.exit_code == 0
+                assert "Task validation passed" in result.output
+                assert "Dry run mode" in result.output
+
+    def test_submit_with_text_priority_and_duration(self):
+        """Test submit command with priority and duration extraction."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("fsd.cli.commands.submit.Path.cwd", return_value=Path(temp_dir)):
+                # Create .fsd directory first
+                fsd_dir = Path(temp_dir) / ".fsd"
+                fsd_dir.mkdir()
+
+                result = self.runner.invoke(
+                    cli,
+                    ["submit", "--text", "HIGH priority: Fix critical bug. Takes 30m", "--dry-run"],
+                )
+
+                assert result.exit_code == 0
+                assert "Task validation passed" in result.output
+                assert "high" in result.output.lower()
+                assert "30m" in result.output
+
+    def test_submit_with_text_files_extraction(self):
+        """Test submit command with file extraction."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("fsd.cli.commands.submit.Path.cwd", return_value=Path(temp_dir)):
+                # Create .fsd directory first
+                fsd_dir = Path(temp_dir) / ".fsd"
+                fsd_dir.mkdir()
+
+                result = self.runner.invoke(
+                    cli,
+                    ["submit", "--text", "Refactor authentication in auth.py and user.py", "--dry-run"],
+                )
+
+                assert result.exit_code == 0
+                assert "Task validation passed" in result.output

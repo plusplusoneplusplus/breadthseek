@@ -20,6 +20,12 @@ ENV/
 # Python build artifacts
 *.egg-info/
 
+# Python testing and coverage
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+
 # uv lock files
 **/uv.lock
 
