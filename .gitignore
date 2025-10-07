@@ -29,6 +29,9 @@ htmlcov/
 # uv lock files
 **/uv.lock
 
+# FSD runtime data
+.fsd/
+
 # macOS
 .DS_Store
 .AppleDouble
