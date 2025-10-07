@@ -34,6 +34,7 @@ def cli(ctx: click.Context, verbose: bool, config: Optional[Path]) -> None:
     autonomously overnight, executing multi-step development tasks with checkpoints,
     recovery mechanisms, and human-in-the-loop safeguards.
 
+    \b
     Examples:
         fsd init                    # Initialize FSD in current project
         fsd submit task.yaml        # Submit a task

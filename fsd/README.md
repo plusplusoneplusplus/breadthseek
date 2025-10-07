@@ -31,10 +31,24 @@ fsd report --overnight
 
 ## Development
 
-```bash
-# Install development dependencies
-uv sync --dev
+### Running the CLI (No Installation Required!)
 
+From within the `fsd/` directory:
+
+```bash
+# Using the convenience script:
+./run-fsd.sh --help
+
+# All commands work the same way:
+./run-fsd.sh init
+./run-fsd.sh submit task.yaml
+./run-fsd.sh queue list
+./run-fsd.sh status
+```
+
+### Running Tests
+
+```bash
 # Run tests
 uv run pytest
 
@@ -43,6 +57,18 @@ uv run ruff check .
 
 # Run type checking
 uv run mypy .
+```
+
+### Installing (Optional)
+
+If you want to install it globally:
+
+```bash
+# Install in development mode
+./install-dev.sh
+
+# Or manually:
+uv pip install -e .
 ```
 
 ## License

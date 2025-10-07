@@ -47,8 +47,12 @@ dev = [
 [project.scripts]
 fsd = "fsd.cli.main:main"
 
+[tool.hatch.build]
+sources = {".." = ""}
+
 [tool.hatch.build.targets.wheel]
-packages = ["fsd"]
+only-include = ["fsd"]
+
 
 [tool.ruff]
 target-version = "py310"
