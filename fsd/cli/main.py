@@ -37,7 +37,8 @@ def cli(ctx: click.Context, verbose: bool, config: Optional[Path]) -> None:
     \b
     Examples:
         fsd init                    # Initialize FSD in current project
-        fsd submit task.yaml        # Submit a task
+        fsd submit task.yaml        # Submit a task from YAML file
+        fsd submit --text "HIGH priority: Fix login bug. Takes 30m"  # Natural language task
         fsd queue list              # List queued tasks
         fsd queue start             # Start execution
         fsd status                  # Check status
