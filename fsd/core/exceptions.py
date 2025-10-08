@@ -35,3 +35,21 @@ class GitOperationError(FSDError):
     """Raised when git operations fail."""
 
     pass
+
+
+class ClaudeExecutionError(ExecutionError):
+    """Raised when Claude CLI execution fails."""
+
+    pass
+
+
+class ClaudeTimeoutError(ClaudeExecutionError):
+    """Raised when Claude CLI execution times out."""
+
+    pass
+
+
+class ClaudeOutputParseError(ClaudeExecutionError):
+    """Raised when Claude output cannot be parsed."""
+
+    pass
