@@ -21,6 +21,10 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# Mount static files directory
+static_dir = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
 
 # Request models
 class CreateTaskNaturalLanguage(BaseModel):
