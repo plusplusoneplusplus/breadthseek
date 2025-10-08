@@ -1,80 +1,90 @@
-# Task 9: Planning Agent
+# Task 9: Prompt Template System
 
-**ID:** `fsd-planning-agent`
+**ID:** `fsd-prompt-templates`
 **Priority:** High
-**Estimated Duration:** 5 hours
+**Estimated Duration:** 2 hours
 
 ## Description
 
-Implement the Planning Agent that decomposes tasks into executable steps using LLM.
+Create a prompt template system for guiding Claude Code CLI through different task phases.
 
-The Planning Agent is responsible for:
-- **Task analysis** - Understanding the task requirements and context
-- **Step decomposition** - Breaking down the task into detailed, actionable steps
-- **Complexity estimation** - Estimating time and difficulty for each step
-- **Validation criteria** - Defining how to verify each step succeeded
-- **Recovery strategies** - Planning for potential failures
+**Key Insight:** Since Claude Code CLI is already a full-featured autonomous agent, we don't need to build separate planning/execution/validation agents. Instead, we create well-crafted prompt templates that leverage Claude Code's existing capabilities.
+
+The Prompt Template System provides:
+- **Phase-specific prompts** - Templates for planning, execution, and validation
+- **Variable substitution** - Fill in task details, context, and requirements
+- **Structured output** - Guide Claude to produce parseable JSON responses
+- **Best practices** - Encode domain knowledge into prompt engineering
+- **Reusability** - Templates work across different task types
 
 Core capabilities:
-- Parse task description and context
-- Analyze codebase to understand current state
-- Use LLM (Claude) to generate execution plan
-- Create structured plan with steps, substeps, and checkpoints
-- Estimate execution time based on complexity
-- Identify files that will likely be modified
-- Define test and validation requirements
-- Output plan in structured format for execution
+- Load and parse markdown prompt templates
+- Substitute variables (task description, context, files, criteria)
+- Validate template structure and required fields
+- Support conditional sections based on task properties
+- Store templates in version-controlled `.fsd/prompts/`
 
-Plan structure:
-```python
-{
-  "task_id": "...",
-  "steps": [
-    {
-      "step_number": 1,
-      "description": "...",
-      "estimated_duration": "15m",
-      "files_to_modify": ["..."],
-      "validation": "...",
-      "checkpoint": true
-    }
-  ],
-  "total_estimate": "2h",
-  "complexity": "medium"
-}
+Template structure (markdown format):
+```markdown
+# Planning Phase Prompt
+
+You are helping with autonomous overnight task execution.
+
+## Task Details
+- **ID:** {task_id}
+- **Description:** {description}
+- **Priority:** {priority}
+- **Estimated Duration:** {estimated_duration}
+
+## Context
+{context}
+
+## Instructions
+Analyze this task and create a detailed execution plan...
+
+## Output Format
+Return a JSON plan with the following structure:
+{expected_plan_schema}
 ```
 
 ## Context
 
-- Integrate with Claude API (use Anthropic SDK)
-- Use project context from codebase analysis
-- Consider using retrieval for large codebases
-- Store plans in `.fsd/plans/<task-id>.json`
-- Plan should be detailed enough for automated execution
-- Use few-shot examples to guide LLM planning
-- Handle API errors and rate limits gracefully
+- Use markdown for readability and version control
+- Support Jinja2-style variable substitution: `{variable_name}`
+- Templates guide Claude Code CLI (already has all capabilities)
+- No need for Anthropic SDK - just subprocess to `claude` CLI
+- Store templates in `fsd/prompts/`:
+  - `planning.md` - Task analysis and plan generation
+  - `execution.md` - Code implementation guidance
+  - `validation.md` - Testing and verification
+  - `recovery.md` - Error handling and retry strategies
+- Include few-shot examples in templates
+- Templates are configuration, not code
 
 ## Success Criteria
 
-- ✅ Can analyze task description and generate detailed plan
-- ✅ Uses codebase context to inform planning
-- ✅ Plans include all required fields (steps, validation, etc.)
-- ✅ Time estimates are reasonable
-- ✅ Plans are stored in structured JSON format
-- ✅ Handles LLM API errors gracefully
-- ✅ Unit tests with mocked LLM responses
-- ✅ Integration test with real API (optional, manual)
+- ✅ Template loader can read and parse markdown templates
+- ✅ Variable substitution works correctly
+- ✅ Templates validate required variables are provided
+- ✅ Support for optional/conditional sections
+- ✅ Templates produce structured JSON output when needed
+- ✅ All phase templates created (planning, execution, validation, recovery)
+- ✅ Templates include clear instructions and examples
+- ✅ Unit tests for template rendering
+- ✅ Documentation on creating custom templates
 
 ## Focus Files
 
-- `fsd/agents/planning_agent.py`
-- `fsd/agents/llm_client.py`
-- `fsd/agents/codebase_analyzer.py`
-- `fsd/agents/plan_schema.py`
-- `tests/test_planning_agent.py`
+- `fsd/prompts/planning.md` - Planning phase template
+- `fsd/prompts/execution.md` - Execution phase template
+- `fsd/prompts/validation.md` - Validation phase template
+- `fsd/prompts/recovery.md` - Recovery phase template
+- `fsd/core/prompt_loader.py` - Template loading and rendering
+- `tests/test_prompt_loader.py` - Template tests
+- `docs/prompt-templates.md` - Template documentation
 
 ## On Completion
 
 - **Create PR:** Yes
-- **PR Title:** "feat: Planning Agent with LLM-powered task decomposition"
+- **PR Title:** "feat: Prompt template system for Claude Code CLI phases"
 - **Notify Slack:** No
