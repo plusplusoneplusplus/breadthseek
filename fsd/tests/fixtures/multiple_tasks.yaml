@@ -1,0 +1,34 @@
+# Multiple valid tasks for batch testing
+
+id: batch-task-1
+description: First task in a batch for testing bulk operations
+priority: high
+estimated_duration: 1h
+---
+id: batch-task-2
+description: Second task in a batch for testing bulk operations
+priority: medium
+estimated_duration: 2h
+context: Additional context for second task
+---
+id: batch-task-3
+description: Third task in a batch for testing bulk operations
+priority: low
+estimated_duration: 30m
+success_criteria: Tests pass and code is clean
+---
+id: batch-task-4
+description: Fourth task in a batch for testing bulk operations
+priority: critical
+estimated_duration: 3h
+focus_files:
+  - src/critical.py
+  - tests/test_critical.py
+on_completion:
+  create_pr: true
+  pr_title: "feat: Batch task 4 completion"
+---
+id: batch-task-5
+description: Fifth task in a batch for testing bulk operations
+priority: medium
+estimated_duration: 1h30m

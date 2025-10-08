@@ -1,0 +1,64 @@
+# Sample task definitions for testing
+
+id: simple-task
+description: A simple task with minimal fields for basic testing scenarios
+priority: medium
+estimated_duration: 1h
+---
+id: high-priority-task
+description: High priority task with additional context and focus files
+priority: high
+estimated_duration: 2h30m
+context: |
+  This task requires careful attention to the authentication module.
+  Make sure to follow security best practices and add comprehensive tests.
+focus_files:
+  - src/auth/login.py
+  - src/auth/session.py
+  - tests/test_auth.py
+success_criteria: |
+  - All existing tests pass
+  - New tests added with >90% coverage
+  - Security review completed
+  - No secrets in code
+---
+id: complete-workflow-task
+description: Complete task with all fields populated including PR creation
+priority: critical
+estimated_duration: 4h
+context: |
+  This is a critical bug fix that needs to be deployed immediately.
+  The issue affects production users and is causing data corruption.
+focus_files:
+  - src/database/migration.py
+  - src/database/schema.py
+  - tests/test_database.py
+success_criteria: |
+  - Bug is fixed and verified
+  - Migration runs successfully
+  - All tests pass including integration tests
+  - Rollback procedure documented
+on_completion:
+  create_pr: true
+  pr_title: "fix: Critical database migration bug causing data corruption"
+  notify_slack: true
+---
+id: refactor-task
+description: Refactor legacy code module to use modern patterns
+priority: low
+estimated_duration: 3h
+context: |
+  The legacy user management code needs refactoring.
+  Current code uses old patterns and is hard to test.
+focus_files:
+  - src/legacy/user_manager.py
+  - src/models/user.py
+success_criteria: |
+  - Code follows current patterns
+  - All functionality preserved
+  - Test coverage improved
+  - No breaking changes
+on_completion:
+  create_pr: true
+  pr_title: "refactor: Modernize user management code"
+  notify_slack: false

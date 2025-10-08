@@ -1,0 +1,39 @@
+# Invalid task definitions for testing validation
+
+# Task with ID too short
+id: ab
+description: This task has an invalid ID that is too short
+priority: medium
+estimated_duration: 1h
+---
+# Task with description too short
+id: valid-task-id
+description: Short
+priority: medium
+estimated_duration: 1h
+---
+# Task with invalid priority
+id: another-valid-id
+description: This task has a valid description but invalid priority
+priority: super_urgent
+estimated_duration: 1h
+---
+# Task with invalid duration format
+id: duration-test-task
+description: This task has an invalid duration format for testing
+priority: medium
+estimated_duration: two hours
+---
+# Task missing required fields
+description: This task is missing the required id field
+priority: medium
+estimated_duration: 1h
+---
+# Task with PR title but create_pr is false
+id: pr-validation-task
+description: Task with inconsistent PR configuration for validation testing
+priority: medium
+estimated_duration: 1h
+on_completion:
+  create_pr: false
+  pr_title: "This should cause validation error"
