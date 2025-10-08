@@ -869,7 +869,7 @@ def auto_execution_loop():
                         }) + "\n")
                     
                     # Execute task
-                    result = phase_executor.execute_task(task)
+                    result = phase_executor.execute_task(task.id)
                     
                     # Log success
                     with open(task_log_file, "a", encoding="utf-8") as log:
@@ -1046,7 +1046,7 @@ async def start_execution(
                         }) + "\n")
                     
                     # Execute task through all phases (Planning -> Execution -> Validation)
-                    result = phase_executor.execute_task(task)
+                    result = phase_executor.execute_task(task.id)
                     
                     # Log success
                     with open(task_log_file, "a", encoding="utf-8") as log:
