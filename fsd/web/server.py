@@ -22,6 +22,7 @@ from fsd.core.state_persistence import StatePersistence
 from fsd.core.task_state import TaskState
 from fsd.orchestrator.phase_executor import PhaseExecutor
 from fsd.core.claude_executor import ClaudeExecutor
+from fsd.core.checkpoint_manager import CheckpointManager
 
 app = FastAPI(
     title="FSD Web Interface",
@@ -125,7 +126,7 @@ def get_state_machine() -> Optional[TaskStateMachine]:
 
     state_dir = get_fsd_dir() / "state"
     if not state_dir.exists():
-        return None
+        state_dir.mkdir(parents=True, exist_ok=True)
 
     try:
         persistence = StatePersistence(state_dir=state_dir)
@@ -423,12 +424,10 @@ async def get_recent_completed_tasks(limit: int = 10) -> List[CompletedTaskInfo]
     completed_tasks = []
 
     try:
-        all_task_ids = state_machine.list_tasks()
+        all_states = state_machine.get_all_states()
 
-        for task_id in all_task_ids:
+        for task_id, state_info in all_states.items():
             try:
-                state_info = state_machine.get_state_info(task_id)
-
                 # Only include completed or failed tasks
                 if state_info.current_state not in [TaskState.COMPLETED, TaskState.FAILED]:
                     continue
@@ -850,9 +849,14 @@ def auto_execution_loop():
                         time.sleep(10)
                         continue
                     
+                    checkpoint_dir = get_fsd_dir() / "checkpoints"
+                    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+                    checkpoint_manager = CheckpointManager(checkpoint_dir=checkpoint_dir)
+                    
                     phase_executor = PhaseExecutor(
-                        claude_executor=claude_executor,
-                        state_machine=state_machine
+                        state_machine=state_machine,
+                        checkpoint_manager=checkpoint_manager,
+                        claude_executor=claude_executor
                     )
                     
                     # Log start
@@ -865,7 +869,7 @@ def auto_execution_loop():
                         }) + "\n")
                     
                     # Execute task
-                    phase_executor.execute_task(task)
+                    result = phase_executor.execute_task(task)
                     
                     # Log success
                     with open(task_log_file, "a", encoding="utf-8") as log:
@@ -877,8 +881,11 @@ def auto_execution_loop():
                         }) + "\n")
                     
                 except Exception as e:
+                    import traceback
                     error_msg = str(e)
+                    traceback_str = traceback.format_exc()
                     print(f"Auto-execution error for task {task.id}: {error_msg}")
+                    print(f"Traceback:\n{traceback_str}")
                     
                     with open(task_log_file, "a", encoding="utf-8") as log:
                         log.write(json.dumps({
@@ -905,7 +912,10 @@ def auto_execution_loop():
             time.sleep(5)
             
         except Exception as e:
+            import traceback
+            traceback_str = traceback.format_exc()
             print(f"Auto-execution loop error: {e}")
+            print(f"Traceback:\n{traceback_str}")
             time.sleep(10)
 
 
@@ -997,9 +1007,14 @@ async def start_execution(
                 print("Failed to initialize state machine")
                 return
             
+            checkpoint_dir = get_fsd_dir() / "checkpoints"
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            checkpoint_manager = CheckpointManager(checkpoint_dir=checkpoint_dir)
+            
             phase_executor = PhaseExecutor(
-                claude_executor=claude_executor,
-                state_machine=state_machine
+                state_machine=state_machine,
+                checkpoint_manager=checkpoint_manager,
+                claude_executor=claude_executor
             )
             
             for task_info in tasks_to_execute:
@@ -1031,7 +1046,7 @@ async def start_execution(
                         }) + "\n")
                     
                     # Execute task through all phases (Planning -> Execution -> Validation)
-                    phase_executor.execute_task(task)
+                    result = phase_executor.execute_task(task)
                     
                     # Log success
                     with open(task_log_file, "a", encoding="utf-8") as log:
@@ -1044,8 +1059,11 @@ async def start_execution(
                     
                 except Exception as e:
                     # Log error and mark as failed
+                    import traceback
                     error_msg = str(e)
+                    traceback_str = traceback.format_exc()
                     print(f"Execution error for task {task.id}: {error_msg}")
+                    print(f"Traceback:\n{traceback_str}")
                     
                     with open(task_log_file, "a", encoding="utf-8") as log:
                         log.write(json.dumps({

@@ -443,8 +443,9 @@ async function loadCompletedTasks() {
 
     } catch (error) {
         console.error('Failed to load completed tasks:', error);
+        const errorMsg = error.message || 'Unknown error';
         document.getElementById('completed-tasks-list').innerHTML =
-            '<div class="error">Failed to load completed tasks</div>';
+            `<div class="error">Failed to load completed tasks: ${errorMsg}</div>`;
     }
 }
 

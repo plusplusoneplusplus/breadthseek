@@ -49,11 +49,19 @@ dev = [
 [project.scripts]
 fsd = "fsd.cli.main:main"
 
-[tool.hatch.build]
-sources = {".." = ""}
-
 [tool.hatch.build.targets.wheel]
-only-include = ["fsd"]
+packages = ["cli", "core", "config", "orchestrator", "web", "prompts", "agents", "tracking"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"__init__.py" = "fsd/__init__.py"
+"cli" = "fsd/cli"
+"core" = "fsd/core"
+"config" = "fsd/config"
+"orchestrator" = "fsd/orchestrator"
+"web" = "fsd/web"
+"prompts" = "fsd/prompts"
+"agents" = "fsd/agents"
+"tracking" = "fsd/tracking"
 
 
 [tool.ruff]
