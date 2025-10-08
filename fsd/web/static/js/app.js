@@ -119,14 +119,24 @@ async function loadSystemStatus() {
             hideInitSection();
         }
 
-        // Update status badge
+        // Update status badges (both top and overview)
+        const topBadge = document.getElementById('top-status-badge');
         const badge = document.getElementById('system-status-badge');
-        if (status.execution_active) {
-            badge.className = 'status-badge active';
-            badge.innerHTML = '<span class="status-indicator" style="background: #f59e0b;"></span>Active';
-        } else {
-            badge.className = 'status-badge idle';
-            badge.innerHTML = '<span class="status-indicator" style="background: #10b981;"></span>Idle';
+        
+        const badgeHTML = status.execution_active
+            ? '<span class="status-indicator" style="background: #f59e0b;"></span>Active'
+            : '<span class="status-indicator" style="background: #10b981;"></span>Idle';
+        
+        const badgeClass = status.execution_active ? 'status-badge active' : 'status-badge idle';
+        
+        if (topBadge) {
+            topBadge.className = badgeClass;
+            topBadge.innerHTML = badgeHTML;
+        }
+        
+        if (badge) {
+            badge.className = badgeClass;
+            badge.innerHTML = badgeHTML;
         }
 
         // Update stats
@@ -487,6 +497,27 @@ function switchTab(tab) {
         document.getElementById('natural-tab').classList.add('active');
     } else {
         document.getElementById('structured-tab').classList.add('active');
+    }
+}
+
+// Main Tab Switching
+function switchMainTab(tabName) {
+    // Update tab buttons
+    document.querySelectorAll('.main-tab').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.dataset.tab === tabName) {
+            btn.classList.add('active');
+        }
+    });
+
+    // Update tab content
+    document.querySelectorAll('.main-tab-content').forEach(content => {
+        content.classList.remove('active');
+    });
+
+    const targetTab = document.getElementById(`tab-${tabName}`);
+    if (targetTab) {
+        targetTab.classList.add('active');
     }
 }
 
@@ -854,82 +885,42 @@ async function bulkDeleteTasks() {
 }
 
 // Execution Control
-function openExecutionModal() {
+async function openExecutionModal() {
     if (!isInitialized) {
         showError('Please initialize FSD first');
         return;
     }
-    
-    const modal = document.getElementById('execution-modal');
-    const taskSelect = document.getElementById('execution-task-id');
-    
-    // Populate task dropdown with queued tasks
-    const queuedTasks = allTasks.filter(t => t.status === 'queued');
-    
-    let options = '<option value="">All queued tasks</option>';
-    queuedTasks.forEach(task => {
-        options += `<option value="${task.id}">${task.id} - ${task.description.substring(0, 50)}${task.description.length > 50 ? '...' : ''}</option>`;
-    });
-    
-    taskSelect.innerHTML = options;
-    modal.classList.add('active');
-}
 
-function closeExecutionModal(event) {
-    if (!event || event.target.classList.contains('modal-overlay')) {
-        document.getElementById('execution-modal').classList.remove('active');
-    }
-}
-
-async function startExecution(event) {
-    event.preventDefault();
-    
-    const submitBtn = document.getElementById('execution-submit');
-    const originalText = submitBtn.textContent;
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Starting...';
-    
+    // Directly start execution in autonomous mode without asking
     try {
-        const mode = document.getElementById('execution-mode').value;
-        const taskId = document.getElementById('execution-task-id').value;
-        
-        // Build query params
-        const params = new URLSearchParams({ mode });
-        if (taskId) {
-            params.append('task_id', taskId);
-        }
-        
-        const response = await fetch(`/api/execution/start?${params}`, {
+        const response = await fetch('/api/execution/start?mode=autonomous', {
             method: 'POST',
         });
-        
+
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.detail || 'Failed to start execution');
         }
-        
+
         const result = await response.json();
-        
+
         // Show success message with note if present
         let message = result.message;
         if (result.note) {
             message += ` (${result.note})`;
         }
         showSuccess(message);
-        
-        closeExecutionModal();
-        
+
         // Refresh data after a short delay to allow execution to start
         setTimeout(() => refreshData(), 1000);
-        
+
     } catch (error) {
         console.error('Failed to start execution:', error);
         showError(error.message || 'Failed to start execution');
-    } finally {
-        submitBtn.disabled = false;
-        submitBtn.textContent = originalText;
     }
 }
+
+// Execution modal functions removed - execution now starts directly
 
 async function stopExecution() {
     if (!isInitialized) {

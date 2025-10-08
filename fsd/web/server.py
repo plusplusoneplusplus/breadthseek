@@ -3,6 +3,8 @@
 import json
 import re
 import yaml
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -18,6 +20,8 @@ from fsd.core.task_schema import TaskDefinition, load_task_from_yaml, Priority, 
 from fsd.core.state_machine import TaskStateMachine
 from fsd.core.state_persistence import StatePersistence
 from fsd.core.task_state import TaskState
+from fsd.orchestrator.phase_executor import PhaseExecutor
+from fsd.core.claude_executor import ClaudeExecutor
 
 app = FastAPI(
     title="FSD Web Interface",
@@ -28,6 +32,10 @@ app = FastAPI(
 # Mount static files directory
 static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+# Auto-execution flag and thread
+auto_execution_enabled = False
+auto_execution_thread = None
 
 
 # Request models
@@ -295,6 +303,8 @@ async def health_check() -> Dict[str, str]:
 @app.get("/api/status", response_model=SystemStatus)
 async def get_system_status() -> SystemStatus:
     """Get system status."""
+    global auto_execution_enabled
+    
     if not is_fsd_initialized():
         return SystemStatus(
             execution_active=False,
@@ -311,7 +321,8 @@ async def get_system_status() -> SystemStatus:
         if status in task_counts:
             task_counts[status] += 1
 
-    execution_active = task_counts["running"] > 0
+    # System is active if tasks are running OR auto-execution is enabled with queued tasks
+    execution_active = task_counts["running"] > 0 or (auto_execution_enabled and task_counts["queued"] > 0)
 
     return SystemStatus(
         execution_active=execution_active,
@@ -765,6 +776,139 @@ async def get_activity(limit: int = 50) -> List[ActivityEvent]:
     return get_activity_logs(limit=limit)
 
 
+@app.post("/api/execution/auto-enable")
+async def enable_auto_execution() -> Dict[str, Any]:
+    """Enable automatic execution of queued tasks."""
+    global auto_execution_enabled, auto_execution_thread
+    
+    if not is_fsd_initialized():
+        raise HTTPException(status_code=400, detail="FSD not initialized")
+    
+    if auto_execution_enabled:
+        return {
+            "success": True,
+            "message": "Auto-execution is already enabled",
+            "auto_execution": True
+        }
+    
+    auto_execution_enabled = True
+    
+    # Start auto-execution thread if not running
+    if auto_execution_thread is None or not auto_execution_thread.is_alive():
+        auto_execution_thread = threading.Thread(target=auto_execution_loop, daemon=True)
+        auto_execution_thread.start()
+    
+    return {
+        "success": True,
+        "message": "Auto-execution enabled - queued tasks will execute automatically",
+        "auto_execution": True
+    }
+
+
+def auto_execution_loop():
+    """Background loop that automatically executes queued tasks."""
+    global auto_execution_enabled
+    
+    while True:
+        try:
+            if not auto_execution_enabled:
+                time.sleep(5)
+                continue
+            
+            # Check for queued tasks
+            tasks = get_all_tasks()
+            queued_tasks = [t for t in tasks if t["status"] == "queued"]
+            running_tasks = [t for t in tasks if t["status"] == "running"]
+            
+            # If there are queued tasks and no running tasks, start execution
+            if queued_tasks and not running_tasks:
+                print(f"Auto-execution: Found {len(queued_tasks)} queued task(s), starting execution...")
+                
+                # Execute the highest priority queued task
+                task_info = queued_tasks[0]
+                task = task_info["task"]
+                
+                fsd_dir = get_fsd_dir()
+                logs_dir = fsd_dir / "logs"
+                logs_dir.mkdir(exist_ok=True)
+                task_log_file = logs_dir / f"{task.id}.log"
+                
+                try:
+                    # Load configuration
+                    config = load_config()
+                    
+                    # Initialize executors
+                    claude_executor = ClaudeExecutor(
+                        command=config.claude.command,
+                        working_dir=Path(config.claude.working_dir),
+                        default_timeout=1800
+                    )
+                    
+                    state_machine = get_state_machine()
+                    if not state_machine:
+                        print("Auto-execution: Failed to initialize state machine")
+                        time.sleep(10)
+                        continue
+                    
+                    phase_executor = PhaseExecutor(
+                        claude_executor=claude_executor,
+                        state_machine=state_machine
+                    )
+                    
+                    # Log start
+                    with open(task_log_file, "a", encoding="utf-8") as log:
+                        log.write(json.dumps({
+                            "timestamp": datetime.now().isoformat(),
+                            "level": "INFO",
+                            "message": "Auto-execution: Starting task",
+                            "task_id": task.id
+                        }) + "\n")
+                    
+                    # Execute task
+                    phase_executor.execute_task(task)
+                    
+                    # Log success
+                    with open(task_log_file, "a", encoding="utf-8") as log:
+                        log.write(json.dumps({
+                            "timestamp": datetime.now().isoformat(),
+                            "level": "INFO",
+                            "message": "Auto-execution: Task completed successfully",
+                            "task_id": task.id
+                        }) + "\n")
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    print(f"Auto-execution error for task {task.id}: {error_msg}")
+                    
+                    with open(task_log_file, "a", encoding="utf-8") as log:
+                        log.write(json.dumps({
+                            "timestamp": datetime.now().isoformat(),
+                            "level": "ERROR",
+                            "message": f"Auto-execution: Task failed: {error_msg}",
+                            "task_id": task.id,
+                            "error": error_msg
+                        }) + "\n")
+                    
+                    # Update status to failed
+                    status_dir = fsd_dir / "status"
+                    status_dir.mkdir(exist_ok=True)
+                    status_file = status_dir / f"{task.id}.json"
+                    with open(status_file, "w", encoding="utf-8") as f:
+                        json.dump({
+                            "status": "failed",
+                            "updated_at": datetime.now().isoformat(),
+                            "mode": "auto",
+                            "error": error_msg
+                        }, f, indent=2)
+            
+            # Sleep before next check
+            time.sleep(5)
+            
+        except Exception as e:
+            print(f"Auto-execution loop error: {e}")
+            time.sleep(10)
+
+
 @app.post("/api/execution/start")
 async def start_execution(
     mode: str = "interactive",
@@ -776,6 +920,8 @@ async def start_execution(
         mode: Execution mode (interactive, autonomous, overnight)
         task_id: Optional specific task ID to execute
     """
+    global auto_execution_enabled, auto_execution_thread
+    
     if not is_fsd_initialized():
         raise HTTPException(status_code=400, detail="FSD not initialized")
     
@@ -787,10 +933,13 @@ async def start_execution(
         )
     
     try:
-        from pathlib import Path
-        import subprocess
-        import threading
-        import time
+        # Enable auto-execution
+        auto_execution_enabled = True
+        
+        # Start auto-execution thread if not running
+        if auto_execution_thread is None or not auto_execution_thread.is_alive():
+            auto_execution_thread = threading.Thread(target=auto_execution_loop, daemon=True)
+            auto_execution_thread.start()
         
         fsd_dir = get_fsd_dir()
         logs_dir = fsd_dir / "logs"
@@ -801,7 +950,13 @@ async def start_execution(
         queued_tasks = [t for t in tasks if t["status"] == "queued"]
         
         if not queued_tasks:
-            raise HTTPException(status_code=400, detail="No queued tasks found")
+            return {
+                "success": True,
+                "message": "Auto-execution enabled. No queued tasks found yet.",
+                "mode": mode,
+                "queued_tasks_count": 0,
+                "note": "Tasks added to the queue will execute automatically"
+            }
         
         # Determine which tasks to execute
         tasks_to_execute = []
@@ -821,31 +976,43 @@ async def start_execution(
         else:
             tasks_to_execute = queued_tasks
         
-        # Execute tasks in background thread with logging
+        # Execute tasks in background thread with real executor
         def run_execution():
+            # Load configuration
+            try:
+                config = load_config()
+            except Exception as e:
+                print(f"Failed to load config: {e}")
+                return
+            
+            # Initialize executors
+            claude_executor = ClaudeExecutor(
+                command=config.claude.command,
+                working_dir=Path(config.claude.working_dir),
+                default_timeout=1800  # 30 minutes
+            )
+            
+            state_machine = get_state_machine()
+            if not state_machine:
+                print("Failed to initialize state machine")
+                return
+            
+            phase_executor = PhaseExecutor(
+                claude_executor=claude_executor,
+                state_machine=state_machine
+            )
+            
             for task_info in tasks_to_execute:
                 task = task_info["task"]
                 task_log_file = logs_dir / f"{task.id}.log"
                 
                 try:
-                    # Update status to running
-                    status_dir = fsd_dir / "status"
-                    status_dir.mkdir(exist_ok=True)
-                    status_file = status_dir / f"{task.id}.json"
-                    
-                    with open(status_file, "w", encoding="utf-8") as f:
-                        json.dump({
-                            "status": "running",
-                            "updated_at": datetime.now().isoformat(),
-                            "mode": mode
-                        }, f, indent=2)
-                    
-                    # Write execution logs
+                    # Write start log
                     with open(task_log_file, "a", encoding="utf-8") as log:
                         log.write(json.dumps({
                             "timestamp": datetime.now().isoformat(),
                             "level": "INFO",
-                            "message": f"Starting task execution in {mode} mode",
+                            "message": f"Starting task execution in {mode} mode with PhaseExecutor",
                             "task_id": task.id
                         }) + "\n")
                         
@@ -863,32 +1030,17 @@ async def start_execution(
                             "task_id": task.id
                         }) + "\n")
                     
-                    # Simulate task execution (since actual agent execution isn't implemented)
-                    time.sleep(2)  # Simulate some work
+                    # Execute task through all phases (Planning -> Execution -> Validation)
+                    phase_executor.execute_task(task)
                     
+                    # Log success
                     with open(task_log_file, "a", encoding="utf-8") as log:
                         log.write(json.dumps({
                             "timestamp": datetime.now().isoformat(),
-                            "level": "WARN",
-                            "message": "Task execution engine not yet fully implemented - this is a placeholder",
-                            "task_id": task.id
-                        }) + "\n")
-                        
-                        log.write(json.dumps({
-                            "timestamp": datetime.now().isoformat(),
                             "level": "INFO",
-                            "message": "Task marked as completed (placeholder execution)",
+                            "message": "Task execution completed successfully",
                             "task_id": task.id
                         }) + "\n")
-                    
-                    # Update status to completed
-                    with open(status_file, "w", encoding="utf-8") as f:
-                        json.dump({
-                            "status": "completed",
-                            "updated_at": datetime.now().isoformat(),
-                            "mode": mode,
-                            "note": "Placeholder execution - full agent implementation pending"
-                        }, f, indent=2)
                     
                 except Exception as e:
                     # Log error and mark as failed
@@ -904,6 +1056,10 @@ async def start_execution(
                             "error": error_msg
                         }) + "\n")
                     
+                    # Update status to failed
+                    status_dir = fsd_dir / "status"
+                    status_dir.mkdir(exist_ok=True)
+                    status_file = status_dir / f"{task.id}.json"
                     with open(status_file, "w", encoding="utf-8") as f:
                         json.dump({
                             "status": "failed",
@@ -917,11 +1073,11 @@ async def start_execution(
         
         return {
             "success": True,
-            "message": f"Task execution started in {mode} mode - check logs for progress",
+            "message": f"Auto-execution enabled in {mode} mode - queued tasks will execute automatically",
             "mode": mode,
             "task_id": task_id,
             "queued_tasks_count": len(queued_tasks),
-            "note": "Execution engine is a placeholder - full agent implementation pending"
+            "note": "Tasks will go through Planning → Execution → Validation phases automatically"
         }
     
     except HTTPException:
@@ -936,10 +1092,15 @@ async def start_execution(
 @app.post("/api/execution/stop")
 async def stop_execution() -> Dict[str, Any]:
     """Stop task execution."""
+    global auto_execution_enabled
+    
     if not is_fsd_initialized():
         raise HTTPException(status_code=400, detail="FSD not initialized")
     
     try:
+        # Disable auto-execution
+        auto_execution_enabled = False
+        
         # Find running tasks and mark them as failed (cancelled)
         tasks = get_all_tasks()
         running_tasks = [t for t in tasks if t["status"] == "running"]
@@ -947,7 +1108,7 @@ async def stop_execution() -> Dict[str, Any]:
         if not running_tasks:
             return {
                 "success": True,
-                "message": "No running tasks to stop",
+                "message": "No running tasks to stop. Auto-execution disabled.",
                 "stopped_count": 0
             }
         
@@ -970,7 +1131,7 @@ async def stop_execution() -> Dict[str, Any]:
         
         return {
             "success": True,
-            "message": f"Stopped {len(running_tasks)} running task(s)",
+            "message": f"Stopped {len(running_tasks)} running task(s). Auto-execution disabled.",
             "stopped_count": len(running_tasks)
         }
     

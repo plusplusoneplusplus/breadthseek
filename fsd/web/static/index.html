@@ -16,6 +16,23 @@
         <div id="error-container"></div>
         <div id="success-container"></div>
 
+        <!-- Quick Actions at Top -->
+        <div class="card" style="margin-bottom: 24px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h2 style="margin: 0;">Quick Actions</h2>
+                <span id="top-status-badge" class="status-badge idle">
+                    <span class="status-indicator" style="background: #10b981;"></span>
+                    Idle
+                </span>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+                <button class="refresh-btn" onclick="openExecutionModal()">▶️ Start Execution</button>
+                <button class="refresh-btn" style="background: #ef4444;" onclick="stopExecution()">⏹️ Stop Execution</button>
+                <button class="refresh-btn" onclick="refreshData()">🔄 Refresh Data</button>
+                <button class="refresh-btn" style="background: #10b981;" onclick="window.location.href='/docs'">📖 API Documentation</button>
+            </div>
+        </div>
+
         <div id="init-section" style="display: none;">
             <div class="card">
                 <div class="init-container">
@@ -33,89 +50,109 @@
         </div>
 
         <div id="main-content">
-            <div class="grid">
-                <div class="card">
-                    <h2>
-                        System Status
-                        <span id="system-status-badge" class="status-badge idle">
-                            <span class="status-indicator" style="background: #10b981;"></span>
-                            Idle
-                        </span>
-                    </h2>
-                    <div id="system-stats">
-                        <div class="loading">Loading...</div>
+            <!-- Tab Navigation -->
+            <div class="main-tabs">
+                <button class="main-tab active" data-tab="overview" onclick="switchMainTab('overview')">📊 Overview</button>
+                <button class="main-tab" data-tab="tasks" onclick="switchMainTab('tasks')">📋 Tasks</button>
+                <button class="main-tab" data-tab="activity" onclick="switchMainTab('activity')">📈 Activity</button>
+                <button class="main-tab" data-tab="logs" onclick="switchMainTab('logs')">📝 Logs</button>
+            </div>
+
+            <!-- Overview Tab -->
+            <div id="tab-overview" class="main-tab-content active">
+                <div class="grid">
+                    <div class="card">
+                        <h2>
+                            System Status
+                            <span id="system-status-badge" class="status-badge idle">
+                                <span class="status-indicator" style="background: #10b981;"></span>
+                                Idle
+                            </span>
+                        </h2>
+                        <div id="system-stats">
+                            <div class="loading">Loading...</div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h2>Task Queue</h2>
+                        <div id="queue-stats">
+                            <div class="loading">Loading...</div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h2>Quick Actions</h2>
+                        <div style="display: flex; flex-direction: column; gap: 12px;">
+                            <button class="refresh-btn" onclick="openExecutionModal()">▶️ Start Execution</button>
+                            <button class="refresh-btn" style="background: #ef4444;" onclick="stopExecution()">⏹️ Stop Execution</button>
+                            <button class="refresh-btn" onclick="refreshData()">🔄 Refresh Data</button>
+                            <button class="refresh-btn" style="background: #10b981;" onclick="window.location.href='/docs'">📖 API Documentation</button>
+                        </div>
                     </div>
                 </div>
 
-                <div class="card">
-                    <h2>Task Queue</h2>
-                    <div id="queue-stats">
-                        <div class="loading">Loading...</div>
-                    </div>
-                </div>
-
-                <div class="card">
-                    <h2>Quick Actions</h2>
-                    <div style="display: flex; flex-direction: column; gap: 12px;">
-                        <button class="refresh-btn" onclick="openExecutionModal()">▶️ Start Execution</button>
-                        <button class="refresh-btn" style="background: #ef4444;" onclick="stopExecution()">⏹️ Stop Execution</button>
-                        <button class="refresh-btn" onclick="refreshData()">🔄 Refresh Data</button>
-                        <button class="refresh-btn" style="background: #10b981;" onclick="window.location.href='/docs'">📖 API Documentation</button>
+                <div class="completed-tasks-section" style="margin-top: 32px;">
+                    <h2 style="margin-bottom: 16px;">✅ Recent Completed Tasks</h2>
+                    <div id="completed-tasks-list">
+                        <div class="loading">Loading completed tasks...</div>
                     </div>
                 </div>
             </div>
 
-            <div class="completed-tasks-section" style="margin-top: 32px;">
-                <h2 style="margin-bottom: 16px;">✅ Recent Completed Tasks</h2>
-                <div id="completed-tasks-list">
-                    <div class="loading">Loading completed tasks...</div>
-                </div>
-            </div>
-
-            <div class="tasks-section">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                    <h2 style="margin: 0;">Tasks</h2>
-                    <button class="refresh-btn" onclick="bulkDeleteTasks()" style="background: #ef4444; padding: 8px 16px;">
-                        🗑️ Clear Completed
-                    </button>
-                </div>
-                <div class="task-filters">
-                    <button class="filter-btn active" data-filter="all" onclick="filterTasks('all')">All</button>
-                    <button class="filter-btn" data-filter="queued" onclick="filterTasks('queued')">Queued</button>
-                    <button class="filter-btn" data-filter="running" onclick="filterTasks('running')">Running</button>
-                    <button class="filter-btn" data-filter="completed" onclick="filterTasks('completed')">Completed</button>
-                    <button class="filter-btn" data-filter="failed" onclick="filterTasks('failed')">Failed</button>
-                </div>
-                <div id="tasks-list">
-                    <div class="loading">Loading tasks...</div>
-                </div>
-            </div>
-
-            <div class="activity-section">
-                <h2 style="margin-bottom: 16px;">Recent Activity</h2>
-                <div id="activity-list">
-                    <div class="loading">Loading activity...</div>
-                </div>
-            </div>
-
-            <div class="logs-section" style="margin-top: 32px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                    <h2 style="margin: 0;">System Logs</h2>
-                    <div style="display: flex; gap: 8px; align-items: center;">
-                        <select id="log-level-filter" onchange="filterLogs()" style="padding: 8px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 14px;">
-                            <option value="">All Levels</option>
-                            <option value="DEBUG">DEBUG</option>
-                            <option value="INFO">INFO</option>
-                            <option value="WARN">WARN</option>
-                            <option value="ERROR">ERROR</option>
-                        </select>
-                        <button class="refresh-btn" onclick="loadSystemLogs()" style="padding: 8px 16px;">
-                            🔄 Refresh Logs
+            <!-- Tasks Tab -->
+            <div id="tab-tasks" class="main-tab-content">
+                <div class="tasks-section">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                        <h2 style="margin: 0;">Tasks</h2>
+                        <button class="refresh-btn" onclick="bulkDeleteTasks()" style="background: #ef4444; padding: 8px 16px;">
+                            🗑️ Clear Completed
                         </button>
                     </div>
+                    <div class="task-filters">
+                        <button class="filter-btn active" data-filter="all" onclick="filterTasks('all')">All</button>
+                        <button class="filter-btn" data-filter="queued" onclick="filterTasks('queued')">Queued</button>
+                        <button class="filter-btn" data-filter="running" onclick="filterTasks('running')">Running</button>
+                        <button class="filter-btn" data-filter="completed" onclick="filterTasks('completed')">Completed</button>
+                        <button class="filter-btn" data-filter="failed" onclick="filterTasks('failed')">Failed</button>
+                    </div>
+                    <div id="tasks-list">
+                        <div class="loading">Loading tasks...</div>
+                    </div>
                 </div>
-                <div id="logs-container" style="background: #1e1e1e; color: #d4d4d4; padding: 16px; border-radius: 8px; font-family: 'Monaco', 'Menlo', 'Consolas', monospace; font-size: 13px; max-height: 500px; overflow-y: auto;">
-                    <div class="loading" style="color: #d4d4d4;">Loading logs...</div>
+            </div>
+
+            <!-- Activity Tab -->
+            <div id="tab-activity" class="main-tab-content">
+                <div class="activity-section">
+                    <h2 style="margin-bottom: 16px;">Recent Activity</h2>
+                    <div id="activity-list">
+                        <div class="loading">Loading activity...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Logs Tab -->
+            <div id="tab-logs" class="main-tab-content">
+                <div class="logs-section">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                        <h2 style="margin: 0;">System Logs</h2>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <select id="log-level-filter" onchange="filterLogs()" style="padding: 8px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 14px;">
+                                <option value="">All Levels</option>
+                                <option value="DEBUG">DEBUG</option>
+                                <option value="INFO">INFO</option>
+                                <option value="WARN">WARN</option>
+                                <option value="ERROR">ERROR</option>
+                            </select>
+                            <button class="refresh-btn" onclick="loadSystemLogs()" style="padding: 8px 16px;">
+                                🔄 Refresh Logs
+                            </button>
+                        </div>
+                    </div>
+                    <div id="logs-container" style="background: #1e1e1e; color: #d4d4d4; padding: 16px; border-radius: 8px; font-family: 'Monaco', 'Menlo', 'Consolas', monospace; font-size: 13px; max-height: 500px; overflow-y: auto;">
+                        <div class="loading" style="color: #d4d4d4;">Loading logs...</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -133,14 +170,13 @@
         // Load modal templates dynamically
         async function loadModals() {
             try {
-                const [taskDetailHTML, taskCreationHTML, executionHTML] = await Promise.all([
+                const [taskDetailHTML, taskCreationHTML] = await Promise.all([
                     fetch('/static/templates/task-detail-modal.html').then(r => r.text()),
-                    fetch('/static/templates/task-creation-modal.html').then(r => r.text()),
-                    fetch('/static/templates/execution-modal.html').then(r => r.text())
+                    fetch('/static/templates/task-creation-modal.html').then(r => r.text())
                 ]);
-                
+
                 const container = document.getElementById('modals-container');
-                container.innerHTML = taskDetailHTML + taskCreationHTML + executionHTML;
+                container.innerHTML = taskDetailHTML + taskCreationHTML;
             } catch (error) {
                 console.error('Failed to load modal templates:', error);
             }
