@@ -13,6 +13,7 @@ from fsd.cli.commands.submit import submit_command
 from fsd.cli.commands.queue import queue_group
 from fsd.cli.commands.status import status_command
 from fsd.cli.commands.logs import logs_command
+from fsd.cli.commands.serve import serve_command
 from fsd.core.exceptions import FSDError
 
 console = Console()
@@ -43,6 +44,7 @@ def cli(ctx: click.Context, verbose: bool, config: Optional[Path]) -> None:
         fsd queue start             # Start execution
         fsd status                  # Check status
         fsd logs task-123           # View task logs
+        fsd serve                   # Start web interface
     """
     # Ensure context object exists
     ctx.ensure_object(dict)
@@ -62,6 +64,7 @@ cli.add_command(submit_command, name="submit")
 cli.add_command(queue_group, name="queue")
 cli.add_command(status_command, name="status")
 cli.add_command(logs_command, name="logs")
+cli.add_command(serve_command, name="serve")
 
 
 def main() -> None:

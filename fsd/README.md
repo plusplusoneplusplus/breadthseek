@@ -9,6 +9,7 @@ A Feature-Sliced Design system that enables a CLI-based coding agent to work aut
 - **Comprehensive Tracking**: Logs every action for full transparency
 - **Safety First**: Git-based checkpointing and rollback mechanisms
 - **Morning Reports**: Detailed summaries of overnight work
+- **Web Interface**: Beautiful web dashboard for monitoring tasks and system status
 
 ## Quick Start
 
@@ -27,7 +28,37 @@ fsd queue start --mode overnight
 
 # Check results in the morning
 fsd report --overnight
+
+# Launch web interface (optional)
+fsd serve
+# Then open http://127.0.0.1:10010 in your browser
 ```
+
+## Web Interface
+
+FSD includes a modern web interface for easier monitoring and management of your tasks.
+
+```bash
+# Start the web server
+fsd serve
+
+# Custom port
+fsd serve --port 3000
+
+# Allow external connections
+fsd serve --host 0.0.0.0
+
+# Development mode with auto-reload
+fsd serve --reload
+```
+
+The web interface provides:
+- Real-time system status monitoring
+- Task queue visualization
+- Activity logs and timeline
+- Task filtering and search
+- Auto-refresh every 5 seconds
+- REST API documentation at `/docs`
 
 ## Development
 
