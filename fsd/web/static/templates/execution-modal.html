@@ -1,0 +1,90 @@
+<!-- Execution Modal -->
+<div id="execution-modal" class="modal-overlay" onclick="closeExecutionModal(event)">
+    <div class="modal" style="max-width: 500px;">
+        <div class="modal-header">
+            <h3 style="margin: 0;">Start Task Execution</h3>
+            <button class="modal-close" onclick="closeExecutionModal()">&times;</button>
+        </div>
+        
+        <div class="modal-body">
+            <form onsubmit="startExecution(event)">
+                <div style="margin-bottom: 20px;">
+                    <label for="execution-mode" style="display: block; font-weight: 600; margin-bottom: 8px; color: #374151;">
+                        Execution Mode
+                    </label>
+                    <select 
+                        id="execution-mode" 
+                        required 
+                        style="width: 100%; padding: 10px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 14px;">
+                        <option value="interactive">Interactive - Manual approval for major changes</option>
+                        <option value="autonomous">Autonomous - Minimal human intervention</option>
+                        <option value="overnight">Overnight - Fully autonomous for long tasks</option>
+                    </select>
+                    <p style="margin-top: 8px; font-size: 13px; color: #6b7280;">
+                        Choose how the agent should execute tasks
+                    </p>
+                </div>
+
+                <div style="margin-bottom: 20px;">
+                    <label for="execution-task-id" style="display: block; font-weight: 600; margin-bottom: 8px; color: #374151;">
+                        Task Selection (Optional)
+                    </label>
+                    <select 
+                        id="execution-task-id" 
+                        style="width: 100%; padding: 10px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 14px;">
+                        <option value="">All queued tasks</option>
+                    </select>
+                    <p style="margin-top: 8px; font-size: 13px; color: #6b7280;">
+                        Leave empty to execute all queued tasks in priority order
+                    </p>
+                </div>
+
+                <div style="display: flex; gap: 12px; justify-content: flex-end;">
+                    <button type="button" class="btn btn-secondary" onclick="closeExecutionModal()">
+                        Cancel
+                    </button>
+                    <button type="submit" class="btn btn-primary" id="execution-submit">
+                        ▶️ Start Execution
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Task Logs Modal -->
+<div id="logs-modal" class="modal-overlay" onclick="closeLogsModal(event)">
+    <div class="modal" style="max-width: 900px; max-height: 80vh;">
+        <div class="modal-header">
+            <h3 style="margin: 0;">Task Logs: <span id="logs-modal-task-id"></span></h3>
+            <div style="display: flex; gap: 12px; align-items: center;">
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: normal;">
+                    <input type="checkbox" id="logs-follow-mode" onchange="toggleFollowMode()">
+                    Follow Mode
+                </label>
+                <button class="modal-close" onclick="closeLogsModal()">&times;</button>
+            </div>
+        </div>
+        
+        <div class="modal-body" style="padding: 0;">
+            <div style="padding: 16px; border-bottom: 1px solid #e5e7eb; background: #f9fafb;">
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <select id="logs-modal-level-filter" onchange="reloadTaskLogs()" style="padding: 8px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 14px;">
+                        <option value="">All Levels</option>
+                        <option value="DEBUG">DEBUG</option>
+                        <option value="INFO">INFO</option>
+                        <option value="WARN">WARN</option>
+                        <option value="ERROR">ERROR</option>
+                    </select>
+                    <button class="refresh-btn" onclick="reloadTaskLogs()" style="padding: 8px 16px;">
+                        🔄 Refresh
+                    </button>
+                </div>
+            </div>
+            <div id="logs-modal-container" style="background: #1e1e1e; color: #d4d4d4; padding: 16px; font-family: 'Monaco', 'Menlo', 'Consolas', monospace; font-size: 13px; max-height: 500px; overflow-y: auto; line-height: 1.6;">
+                <div class="loading" style="color: #d4d4d4;">Loading logs...</div>
+            </div>
+        </div>
+    </div>
+</div>
+

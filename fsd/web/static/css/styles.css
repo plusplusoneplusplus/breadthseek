@@ -777,3 +777,69 @@ h1 {
     box-shadow: 0 15px 35px rgba(102, 126, 234, 0.5);
 }
 
+/* Logs Section */
+.logs-section {
+    background: white;
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+#logs-container {
+    font-family: 'Monaco', 'Menlo', 'Consolas', 'Courier New', monospace;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+#logs-container::-webkit-scrollbar {
+    width: 10px;
+}
+
+#logs-container::-webkit-scrollbar-track {
+    background: #2d2d2d;
+}
+
+#logs-container::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 5px;
+}
+
+#logs-container::-webkit-scrollbar-thumb:hover {
+    background: #666;
+}
+
+#logs-modal-container {
+    font-family: 'Monaco', 'Menlo', 'Consolas', 'Courier New', monospace;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+#logs-modal-container::-webkit-scrollbar {
+    width: 10px;
+}
+
+#logs-modal-container::-webkit-scrollbar-track {
+    background: #2d2d2d;
+}
+
+#logs-modal-container::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 5px;
+}
+
+#logs-modal-container::-webkit-scrollbar-thumb:hover {
+    background: #666;
+}
+
+/* Button Secondary Style */
+.btn-secondary,
+.task-item-btn.btn-secondary {
+    background: #6b7280;
+    color: white;
+}
+
+.btn-secondary:hover,
+.task-item-btn.btn-secondary:hover {
+    background: #4b5563;
+}
+

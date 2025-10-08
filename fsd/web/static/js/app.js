@@ -240,6 +240,9 @@ function renderTasks() {
                     <button class="task-item-btn btn-info" onclick="event.stopPropagation(); openTaskDetail('${task.id}')">
                         View Details
                     </button>
+                    <button class="task-item-btn btn-secondary" onclick="event.stopPropagation(); openLogsModal('${task.id}')">
+                        📋 View Logs
+                    </button>
                     <button class="task-item-btn btn-warning" onclick="event.stopPropagation(); cancelTask('${task.id}')">
                         Cancel
                     </button>
@@ -250,6 +253,9 @@ function renderTasks() {
                 <div class="task-item-actions">
                     <button class="task-item-btn btn-info" onclick="event.stopPropagation(); openTaskDetail('${task.id}')">
                         View Details
+                    </button>
+                    <button class="task-item-btn btn-secondary" onclick="event.stopPropagation(); openLogsModal('${task.id}')">
+                        📋 View Logs
                     </button>
                     <button class="task-item-btn btn-success" onclick="event.stopPropagation(); requeueTask('${task.id}')">
                         Re-queue
@@ -600,12 +606,18 @@ function renderTaskDetail(task) {
         `;
     } else if (task.status === 'running') {
         html += `
+            <button class="btn btn-secondary" onclick="closeTaskDetailModal(); openLogsModal('${task.id}')">
+                📋 View Logs
+            </button>
             <button class="btn btn-warning" onclick="cancelTask('${task.id}')">
                 Cancel Execution
             </button>
         `;
     } else if (task.status === 'completed' || task.status === 'failed') {
         html += `
+            <button class="btn btn-secondary" onclick="closeTaskDetailModal(); openLogsModal('${task.id}')">
+                📋 View Logs
+            </button>
             <button class="btn btn-info" onclick="requeueTask('${task.id}')">
                 Re-queue Task
             </button>
@@ -744,15 +756,339 @@ async function bulkDeleteTasks() {
     }
 }
 
+// Execution Control
+function openExecutionModal() {
+    if (!isInitialized) {
+        showError('Please initialize FSD first');
+        return;
+    }
+    
+    const modal = document.getElementById('execution-modal');
+    const taskSelect = document.getElementById('execution-task-id');
+    
+    // Populate task dropdown with queued tasks
+    const queuedTasks = allTasks.filter(t => t.status === 'queued');
+    
+    let options = '<option value="">All queued tasks</option>';
+    queuedTasks.forEach(task => {
+        options += `<option value="${task.id}">${task.id} - ${task.description.substring(0, 50)}${task.description.length > 50 ? '...' : ''}</option>`;
+    });
+    
+    taskSelect.innerHTML = options;
+    modal.classList.add('active');
+}
+
+function closeExecutionModal(event) {
+    if (!event || event.target.classList.contains('modal-overlay')) {
+        document.getElementById('execution-modal').classList.remove('active');
+    }
+}
+
+async function startExecution(event) {
+    event.preventDefault();
+    
+    const submitBtn = document.getElementById('execution-submit');
+    const originalText = submitBtn.textContent;
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Starting...';
+    
+    try {
+        const mode = document.getElementById('execution-mode').value;
+        const taskId = document.getElementById('execution-task-id').value;
+        
+        // Build query params
+        const params = new URLSearchParams({ mode });
+        if (taskId) {
+            params.append('task_id', taskId);
+        }
+        
+        const response = await fetch(`/api/execution/start?${params}`, {
+            method: 'POST',
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to start execution');
+        }
+        
+        const result = await response.json();
+        
+        // Show success message with note if present
+        let message = result.message;
+        if (result.note) {
+            message += ` (${result.note})`;
+        }
+        showSuccess(message);
+        
+        closeExecutionModal();
+        
+        // Refresh data after a short delay to allow execution to start
+        setTimeout(() => refreshData(), 1000);
+        
+    } catch (error) {
+        console.error('Failed to start execution:', error);
+        showError(error.message || 'Failed to start execution');
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
+    }
+}
+
+async function stopExecution() {
+    if (!isInitialized) {
+        showError('FSD not initialized');
+        return;
+    }
+    
+    if (!confirm('Are you sure you want to stop task execution?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/execution/stop', {
+            method: 'POST',
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to stop execution');
+        }
+        
+        const result = await response.json();
+        showSuccess(result.message);
+        
+        // Refresh data
+        await refreshData();
+        
+    } catch (error) {
+        console.error('Failed to stop execution:', error);
+        showError(error.message || 'Failed to stop execution');
+    }
+}
+
+// Log Viewing
+let currentLogTaskId = null;
+let logStreamEventSource = null;
+
+async function loadSystemLogs() {
+    if (!isInitialized) return;
+    
+    try {
+        const levelFilter = document.getElementById('log-level-filter').value;
+        const params = new URLSearchParams({ lines: 200 });
+        if (levelFilter) {
+            params.append('level', levelFilter);
+        }
+        
+        const data = await fetchData(`/logs?${params}`);
+        
+        const container = document.getElementById('logs-container');
+        
+        if (!data.logs || data.logs.length === 0) {
+            container.innerHTML = '<div style="color: #9ca3af;">No logs available</div>';
+            return;
+        }
+        
+        // Render logs
+        const logsHtml = data.logs.map(entry => formatLogEntry(entry)).join('');
+        container.innerHTML = logsHtml;
+        
+        // Auto-scroll to bottom
+        container.scrollTop = container.scrollHeight;
+        
+    } catch (error) {
+        console.error('Failed to load system logs:', error);
+        document.getElementById('logs-container').innerHTML = `<div style="color: #ef4444;">Failed to load logs: ${error.message}</div>`;
+    }
+}
+
+function filterLogs() {
+    loadSystemLogs();
+}
+
+function openLogsModal(taskId) {
+    if (!isInitialized) {
+        showError('FSD not initialized');
+        return;
+    }
+    
+    currentLogTaskId = taskId;
+    
+    const modal = document.getElementById('logs-modal');
+    document.getElementById('logs-modal-task-id').textContent = taskId;
+    document.getElementById('logs-follow-mode').checked = false;
+    document.getElementById('logs-modal-level-filter').value = '';
+    
+    modal.classList.add('active');
+    
+    // Load logs
+    reloadTaskLogs();
+}
+
+function closeLogsModal(event) {
+    if (!event || event.target.classList.contains('modal-overlay')) {
+        // Stop streaming if active
+        if (logStreamEventSource) {
+            logStreamEventSource.close();
+            logStreamEventSource = null;
+        }
+        
+        document.getElementById('logs-modal').classList.remove('active');
+        currentLogTaskId = null;
+    }
+}
+
+async function reloadTaskLogs() {
+    if (!currentLogTaskId) return;
+    
+    try {
+        const levelFilter = document.getElementById('logs-modal-level-filter').value;
+        const params = new URLSearchParams({ lines: 200 });
+        if (levelFilter) {
+            params.append('level', levelFilter);
+        }
+        
+        const data = await fetchData(`/logs/${currentLogTaskId}?${params}`);
+        
+        const container = document.getElementById('logs-modal-container');
+        
+        if (!data.logs || data.logs.length === 0) {
+            container.innerHTML = '<div style="color: #9ca3af;">No logs available for this task</div>';
+            return;
+        }
+        
+        // Render logs
+        const logsHtml = data.logs.map(entry => formatLogEntry(entry)).join('');
+        container.innerHTML = logsHtml;
+        
+        // Auto-scroll to bottom
+        container.scrollTop = container.scrollHeight;
+        
+    } catch (error) {
+        console.error('Failed to load task logs:', error);
+        document.getElementById('logs-modal-container').innerHTML = `<div style="color: #ef4444;">Failed to load logs: ${error.message}</div>`;
+    }
+}
+
+function toggleFollowMode() {
+    const followMode = document.getElementById('logs-follow-mode').checked;
+    
+    if (followMode) {
+        startLogStreaming();
+    } else {
+        stopLogStreaming();
+    }
+}
+
+function startLogStreaming() {
+    if (!currentLogTaskId) return;
+    
+    // Stop existing stream if any
+    stopLogStreaming();
+    
+    const levelFilter = document.getElementById('logs-modal-level-filter').value;
+    const params = new URLSearchParams();
+    if (levelFilter) {
+        params.append('level', levelFilter);
+    }
+    
+    const url = `/api/logs/${currentLogTaskId}/stream?${params}`;
+    
+    logStreamEventSource = new EventSource(url);
+    
+    logStreamEventSource.onmessage = function(event) {
+        try {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === 'log') {
+                // Append new log entry
+                const container = document.getElementById('logs-modal-container');
+                const logHtml = formatLogEntry(data.entry);
+                container.insertAdjacentHTML('beforeend', logHtml);
+                
+                // Auto-scroll to bottom
+                container.scrollTop = container.scrollHeight;
+            } else if (data.type === 'connected') {
+                console.log('Connected to log stream for task:', data.task_id);
+            }
+        } catch (error) {
+            console.error('Error parsing log stream data:', error);
+        }
+    };
+    
+    logStreamEventSource.onerror = function(error) {
+        console.error('Log stream error:', error);
+        stopLogStreaming();
+        showError('Lost connection to log stream');
+        document.getElementById('logs-follow-mode').checked = false;
+    };
+}
+
+function stopLogStreaming() {
+    if (logStreamEventSource) {
+        logStreamEventSource.close();
+        logStreamEventSource = null;
+    }
+}
+
+function formatLogEntry(entry) {
+    if (entry.raw) {
+        return `<div style="color: #d4d4d4; margin-bottom: 4px;">${escapeHtml(entry.message)}</div>`;
+    }
+    
+    // Format timestamp
+    let timeStr = '';
+    if (entry.timestamp && entry.timestamp !== 'unknown') {
+        const timestamp = entry.timestamp.includes('T') ? entry.timestamp.split('T')[1].split('.')[0] : entry.timestamp;
+        timeStr = `<span style="color: #6b7280;">[${timestamp}]</span> `;
+    }
+    
+    // Color code by level
+    const levelColors = {
+        'DEBUG': '#9ca3af',
+        'INFO': '#3b82f6',
+        'WARN': '#f59e0b',
+        'ERROR': '#ef4444'
+    };
+    
+    const levelColor = levelColors[entry.level] || '#d4d4d4';
+    const levelStr = `<span style="color: ${levelColor}; font-weight: 600;">[${entry.level}]</span>`;
+    
+    // Format message
+    const message = escapeHtml(entry.message || '');
+    
+    // Build additional fields
+    let extras = '';
+    if (entry.task_id) {
+        extras += ` <span style="color: #8b5cf6;">[Task: ${entry.task_id}]</span>`;
+    }
+    if (entry.error) {
+        extras += `\n  <span style="color: #ef4444;">Error: ${escapeHtml(entry.error)}</span>`;
+    }
+    
+    return `<div style="margin-bottom: 6px; line-height: 1.5;">${timeStr}${levelStr} ${message}${extras}</div>`;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
 // Initialize Application
 document.addEventListener('DOMContentLoaded', function() {
     // Initial load
     refreshData();
+    loadSystemLogs();
 
     // Auto-refresh every 5 seconds (only if initialized)
     setInterval(() => {
         if (isInitialized) {
             refreshData();
+            // Only refresh logs if not in follow mode
+            if (!document.getElementById('logs-follow-mode') || !document.getElementById('logs-follow-mode').checked) {
+                loadSystemLogs();
+            }
         } else {
             // Just check system status to detect if initialized
             loadSystemStatus();

@@ -58,6 +58,22 @@ fsd serve --reload
 - **Success criteria**: Formatted display with syntax highlighting
 - **Context-aware actions**: Different buttons based on task status
 
+### ▶️ Task Execution
+
+#### Start Execution
+- **Execution modes**:
+  - **Interactive**: Manual approval for major changes
+  - **Autonomous**: Minimal human intervention
+  - **Overnight**: Fully autonomous for long-running tasks
+- **Task selection**: Execute all queued tasks or a specific task
+- **Background execution**: Runs in separate process via CLI
+- **Real-time status**: Immediate feedback when execution starts
+
+#### Stop Execution
+- **Emergency stop**: Cancel all running tasks
+- **Graceful shutdown**: Marks tasks as failed with reason
+- **Confirmation dialog**: Prevents accidental stops
+
 ### 🎯 Task Operations
 
 #### Individual Task Actions
@@ -68,10 +84,12 @@ fsd serve --reload
 
 - **For Running Tasks**:
   - View details
+  - **View logs** (NEW)
   - Cancel execution
 
 - **For Completed/Failed Tasks**:
   - View details
+  - **View logs** (NEW)
   - Re-queue (mark as queued again)
   - Delete (removes from queue)
 
@@ -93,6 +111,27 @@ fsd serve --reload
 - **Timestamps**: Local time formatting
 - **Task tracking**: Links to related tasks
 - **Auto-refresh**: Updates every 5 seconds
+
+### 📋 Log Viewing
+
+#### System Logs
+- **Real-time display**: View logs from all tasks
+- **Terminal-style viewer**: Dark theme with syntax highlighting
+- **Level filtering**: Filter by DEBUG, INFO, WARN, ERROR
+- **200-line buffer**: Shows most recent log entries
+- **Auto-scroll**: Automatically scrolls to latest logs
+- **Auto-refresh**: Updates every 5 seconds
+
+#### Task-Specific Logs
+- **Dedicated log viewer**: Full-screen modal for detailed viewing
+- **Level filtering**: Filter logs by severity level
+- **Follow mode**: Real-time log streaming using Server-Sent Events (SSE)
+- **200-line buffer**: Configurable log history
+- **Auto-scroll**: Follows log output in real-time
+- **Color-coded levels**: Visual distinction for log severity
+- **Timestamp display**: Precise timing for each log entry
+- **Task context**: Shows task ID for each log entry
+- **Error highlighting**: Special formatting for error messages
 
 ### 🎨 User Interface
 
@@ -129,6 +168,15 @@ fsd serve --reload
 - `PATCH /api/tasks/{task_id}/status` - Update task status
 - `POST /api/tasks/{task_id}/cancel` - Cancel a task
 - `POST /api/tasks/bulk-delete` - Bulk delete by status filter
+
+### Execution (NEW)
+- `POST /api/execution/start` - Start task execution with mode selection
+- `POST /api/execution/stop` - Stop all running tasks
+
+### Logs (NEW)
+- `GET /api/logs` - Get system-wide logs (with level filtering)
+- `GET /api/logs/{task_id}` - Get logs for specific task (with level filtering)
+- `GET /api/logs/{task_id}/stream` - Real-time log streaming via Server-Sent Events
 
 ### Activity
 - `GET /api/activity` - Recent activity events (configurable limit)

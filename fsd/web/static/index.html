@@ -57,6 +57,8 @@
                 <div class="card">
                     <h2>Quick Actions</h2>
                     <div style="display: flex; flex-direction: column; gap: 12px;">
+                        <button class="refresh-btn" onclick="openExecutionModal()">▶️ Start Execution</button>
+                        <button class="refresh-btn" style="background: #ef4444;" onclick="stopExecution()">⏹️ Stop Execution</button>
                         <button class="refresh-btn" onclick="refreshData()">🔄 Refresh Data</button>
                         <button class="refresh-btn" style="background: #10b981;" onclick="window.location.href='/docs'">📖 API Documentation</button>
                     </div>
@@ -88,6 +90,27 @@
                     <div class="loading">Loading activity...</div>
                 </div>
             </div>
+
+            <div class="logs-section" style="margin-top: 32px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                    <h2 style="margin: 0;">System Logs</h2>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <select id="log-level-filter" onchange="filterLogs()" style="padding: 8px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 14px;">
+                            <option value="">All Levels</option>
+                            <option value="DEBUG">DEBUG</option>
+                            <option value="INFO">INFO</option>
+                            <option value="WARN">WARN</option>
+                            <option value="ERROR">ERROR</option>
+                        </select>
+                        <button class="refresh-btn" onclick="loadSystemLogs()" style="padding: 8px 16px;">
+                            🔄 Refresh Logs
+                        </button>
+                    </div>
+                </div>
+                <div id="logs-container" style="background: #1e1e1e; color: #d4d4d4; padding: 16px; border-radius: 8px; font-family: 'Monaco', 'Menlo', 'Consolas', monospace; font-size: 13px; max-height: 500px; overflow-y: auto;">
+                    <div class="loading" style="color: #d4d4d4;">Loading logs...</div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -103,13 +126,14 @@
         // Load modal templates dynamically
         async function loadModals() {
             try {
-                const [taskDetailHTML, taskCreationHTML] = await Promise.all([
+                const [taskDetailHTML, taskCreationHTML, executionHTML] = await Promise.all([
                     fetch('/static/templates/task-detail-modal.html').then(r => r.text()),
-                    fetch('/static/templates/task-creation-modal.html').then(r => r.text())
+                    fetch('/static/templates/task-creation-modal.html').then(r => r.text()),
+                    fetch('/static/templates/execution-modal.html').then(r => r.text())
                 ]);
                 
                 const container = document.getElementById('modals-container');
-                container.innerHTML = taskDetailHTML + taskCreationHTML;
+                container.innerHTML = taskDetailHTML + taskCreationHTML + executionHTML;
             } catch (error) {
                 console.error('Failed to load modal templates:', error);
             }

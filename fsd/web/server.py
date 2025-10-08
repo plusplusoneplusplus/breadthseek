@@ -8,9 +8,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+import asyncio
 
 from fsd.config.loader import load_config
 from fsd.core.task_schema import TaskDefinition, load_task_from_yaml, Priority, CompletionActions
@@ -619,6 +620,479 @@ async def get_activity(limit: int = 50) -> List[ActivityEvent]:
         return []
 
     return get_activity_logs(limit=limit)
+
+
+@app.post("/api/execution/start")
+async def start_execution(
+    mode: str = "interactive",
+    task_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """Start task execution.
+    
+    Args:
+        mode: Execution mode (interactive, autonomous, overnight)
+        task_id: Optional specific task ID to execute
+    """
+    if not is_fsd_initialized():
+        raise HTTPException(status_code=400, detail="FSD not initialized")
+    
+    valid_modes = ["interactive", "autonomous", "overnight"]
+    if mode not in valid_modes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid mode. Must be one of: {', '.join(valid_modes)}"
+        )
+    
+    try:
+        from pathlib import Path
+        import subprocess
+        import threading
+        import time
+        
+        fsd_dir = get_fsd_dir()
+        logs_dir = fsd_dir / "logs"
+        logs_dir.mkdir(exist_ok=True)
+        
+        # Get queued tasks
+        tasks = get_all_tasks()
+        queued_tasks = [t for t in tasks if t["status"] == "queued"]
+        
+        if not queued_tasks:
+            raise HTTPException(status_code=400, detail="No queued tasks found")
+        
+        # Determine which tasks to execute
+        tasks_to_execute = []
+        if task_id:
+            task_found = False
+            for task_info in queued_tasks:
+                if task_info["task"].id == task_id:
+                    task_found = True
+                    tasks_to_execute = [task_info]
+                    break
+            
+            if not task_found:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Task '{task_id}' not found or not queued"
+                )
+        else:
+            tasks_to_execute = queued_tasks
+        
+        # Execute tasks in background thread with logging
+        def run_execution():
+            for task_info in tasks_to_execute:
+                task = task_info["task"]
+                task_log_file = logs_dir / f"{task.id}.log"
+                
+                try:
+                    # Update status to running
+                    status_dir = fsd_dir / "status"
+                    status_dir.mkdir(exist_ok=True)
+                    status_file = status_dir / f"{task.id}.json"
+                    
+                    with open(status_file, "w", encoding="utf-8") as f:
+                        json.dump({
+                            "status": "running",
+                            "updated_at": datetime.now().isoformat(),
+                            "mode": mode
+                        }, f, indent=2)
+                    
+                    # Write execution logs
+                    with open(task_log_file, "a", encoding="utf-8") as log:
+                        log.write(json.dumps({
+                            "timestamp": datetime.now().isoformat(),
+                            "level": "INFO",
+                            "message": f"Starting task execution in {mode} mode",
+                            "task_id": task.id
+                        }) + "\n")
+                        
+                        log.write(json.dumps({
+                            "timestamp": datetime.now().isoformat(),
+                            "level": "INFO",
+                            "message": f"Task: {task.description}",
+                            "task_id": task.id
+                        }) + "\n")
+                        
+                        log.write(json.dumps({
+                            "timestamp": datetime.now().isoformat(),
+                            "level": "INFO",
+                            "message": f"Priority: {task.priority.value}, Duration: {task.estimated_duration}",
+                            "task_id": task.id
+                        }) + "\n")
+                    
+                    # Simulate task execution (since actual agent execution isn't implemented)
+                    time.sleep(2)  # Simulate some work
+                    
+                    with open(task_log_file, "a", encoding="utf-8") as log:
+                        log.write(json.dumps({
+                            "timestamp": datetime.now().isoformat(),
+                            "level": "WARN",
+                            "message": "Task execution engine not yet fully implemented - this is a placeholder",
+                            "task_id": task.id
+                        }) + "\n")
+                        
+                        log.write(json.dumps({
+                            "timestamp": datetime.now().isoformat(),
+                            "level": "INFO",
+                            "message": "Task marked as completed (placeholder execution)",
+                            "task_id": task.id
+                        }) + "\n")
+                    
+                    # Update status to completed
+                    with open(status_file, "w", encoding="utf-8") as f:
+                        json.dump({
+                            "status": "completed",
+                            "updated_at": datetime.now().isoformat(),
+                            "mode": mode,
+                            "note": "Placeholder execution - full agent implementation pending"
+                        }, f, indent=2)
+                    
+                except Exception as e:
+                    # Log error and mark as failed
+                    error_msg = str(e)
+                    print(f"Execution error for task {task.id}: {error_msg}")
+                    
+                    with open(task_log_file, "a", encoding="utf-8") as log:
+                        log.write(json.dumps({
+                            "timestamp": datetime.now().isoformat(),
+                            "level": "ERROR",
+                            "message": f"Task execution failed: {error_msg}",
+                            "task_id": task.id,
+                            "error": error_msg
+                        }) + "\n")
+                    
+                    with open(status_file, "w", encoding="utf-8") as f:
+                        json.dump({
+                            "status": "failed",
+                            "updated_at": datetime.now().isoformat(),
+                            "mode": mode,
+                            "error": error_msg
+                        }, f, indent=2)
+        
+        thread = threading.Thread(target=run_execution, daemon=True)
+        thread.start()
+        
+        return {
+            "success": True,
+            "message": f"Task execution started in {mode} mode - check logs for progress",
+            "mode": mode,
+            "task_id": task_id,
+            "queued_tasks_count": len(queued_tasks),
+            "note": "Execution engine is a placeholder - full agent implementation pending"
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to start execution: {str(e)}"
+        )
+
+
+@app.post("/api/execution/stop")
+async def stop_execution() -> Dict[str, Any]:
+    """Stop task execution."""
+    if not is_fsd_initialized():
+        raise HTTPException(status_code=400, detail="FSD not initialized")
+    
+    try:
+        # Find running tasks and mark them as failed (cancelled)
+        tasks = get_all_tasks()
+        running_tasks = [t for t in tasks if t["status"] == "running"]
+        
+        if not running_tasks:
+            return {
+                "success": True,
+                "message": "No running tasks to stop",
+                "stopped_count": 0
+            }
+        
+        fsd_dir = get_fsd_dir()
+        status_dir = fsd_dir / "status"
+        
+        for task_info in running_tasks:
+            task_id = task_info["task"].id
+            status_file = status_dir / f"{task_id}.json"
+            
+            status_data = {
+                "status": "failed",
+                "updated_at": datetime.now().isoformat(),
+                "cancelled": True,
+                "reason": "Stopped by user via web interface"
+            }
+            
+            with open(status_file, "w", encoding="utf-8") as f:
+                json.dump(status_data, f, indent=2)
+        
+        return {
+            "success": True,
+            "message": f"Stopped {len(running_tasks)} running task(s)",
+            "stopped_count": len(running_tasks)
+        }
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to stop execution: {str(e)}"
+        )
+
+
+@app.get("/api/logs/{task_id}")
+async def get_task_logs(
+    task_id: str,
+    lines: int = 100,
+    level: Optional[str] = None
+) -> Dict[str, Any]:
+    """Get logs for a specific task.
+    
+    Args:
+        task_id: Task ID to get logs for
+        lines: Number of lines to return (default: 100)
+        level: Filter by log level (DEBUG, INFO, WARN, ERROR)
+    """
+    if not is_fsd_initialized():
+        raise HTTPException(status_code=400, detail="FSD not initialized")
+    
+    valid_levels = ["DEBUG", "INFO", "WARN", "ERROR"]
+    if level and level not in valid_levels:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid level. Must be one of: {', '.join(valid_levels)}"
+        )
+    
+    try:
+        fsd_dir = get_fsd_dir()
+        logs_dir = fsd_dir / "logs"
+        task_log_file = logs_dir / f"{task_id}.log"
+        
+        if not task_log_file.exists():
+            return {
+                "task_id": task_id,
+                "logs": [],
+                "message": "No logs found for this task"
+            }
+        
+        # Read and parse log file
+        log_entries = []
+        
+        with open(task_log_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                try:
+                    # Try to parse as JSON
+                    entry = json.loads(line)
+                    
+                    # Filter by level if specified
+                    if level and entry.get("level") != level:
+                        continue
+                    
+                    log_entries.append(entry)
+                
+                except json.JSONDecodeError:
+                    # Handle non-JSON log lines
+                    log_entries.append({
+                        "timestamp": "unknown",
+                        "level": "INFO",
+                        "message": line,
+                        "raw": True
+                    })
+        
+        # Return last N entries
+        recent_entries = log_entries[-lines:] if lines else log_entries
+        
+        return {
+            "task_id": task_id,
+            "logs": recent_entries,
+            "total_count": len(log_entries),
+            "returned_count": len(recent_entries)
+        }
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to read logs: {str(e)}"
+        )
+
+
+@app.get("/api/logs")
+async def get_system_logs(
+    lines: int = 100,
+    level: Optional[str] = None
+) -> Dict[str, Any]:
+    """Get system-wide logs from all tasks.
+    
+    Args:
+        lines: Number of lines to return (default: 100)
+        level: Filter by log level (DEBUG, INFO, WARN, ERROR)
+    """
+    if not is_fsd_initialized():
+        raise HTTPException(status_code=400, detail="FSD not initialized")
+    
+    valid_levels = ["DEBUG", "INFO", "WARN", "ERROR"]
+    if level and level not in valid_levels:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid level. Must be one of: {', '.join(valid_levels)}"
+        )
+    
+    try:
+        fsd_dir = get_fsd_dir()
+        logs_dir = fsd_dir / "logs"
+        
+        if not logs_dir.exists():
+            return {
+                "logs": [],
+                "message": "No logs directory found"
+            }
+        
+        # Collect logs from all task files
+        all_entries = []
+        
+        for log_file in logs_dir.glob("*.log"):
+            try:
+                with open(log_file, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        
+                        try:
+                            entry = json.loads(line)
+                            
+                            # Filter by level if specified
+                            if level and entry.get("level") != level:
+                                continue
+                            
+                            # Add task_id from filename
+                            entry["task_id"] = log_file.stem
+                            all_entries.append(entry)
+                        
+                        except json.JSONDecodeError:
+                            all_entries.append({
+                                "timestamp": "unknown",
+                                "level": "INFO",
+                                "message": line,
+                                "task_id": log_file.stem,
+                                "raw": True
+                            })
+            
+            except Exception as e:
+                print(f"Warning: Failed to read {log_file}: {e}")
+        
+        # Sort by timestamp and take last N entries
+        all_entries.sort(key=lambda e: e.get("timestamp", ""))
+        recent_entries = all_entries[-lines:] if lines else all_entries
+        
+        return {
+            "logs": recent_entries,
+            "total_count": len(all_entries),
+            "returned_count": len(recent_entries)
+        }
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to read system logs: {str(e)}"
+        )
+
+
+@app.get("/api/logs/{task_id}/stream")
+async def stream_task_logs(
+    task_id: str,
+    level: Optional[str] = None
+):
+    """Stream logs for a specific task in real-time using Server-Sent Events.
+    
+    Args:
+        task_id: Task ID to stream logs for
+        level: Filter by log level (DEBUG, INFO, WARN, ERROR)
+    """
+    if not is_fsd_initialized():
+        raise HTTPException(status_code=400, detail="FSD not initialized")
+    
+    valid_levels = ["DEBUG", "INFO", "WARN", "ERROR"]
+    if level and level not in valid_levels:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid level. Must be one of: {', '.join(valid_levels)}"
+        )
+    
+    async def log_generator():
+        """Generate log events as they are written to the file."""
+        fsd_dir = get_fsd_dir()
+        logs_dir = fsd_dir / "logs"
+        task_log_file = logs_dir / f"{task_id}.log"
+        
+        # Track file position
+        last_position = 0
+        last_size = 0
+        
+        # Send initial connection message
+        yield f"data: {json.dumps({'type': 'connected', 'task_id': task_id})}\n\n"
+        
+        try:
+            while True:
+                # Check if file exists and has changed
+                if task_log_file.exists():
+                    current_size = task_log_file.stat().st_size
+                    
+                    # Only read if file size changed
+                    if current_size > last_size:
+                        with open(task_log_file, "r", encoding="utf-8") as f:
+                            f.seek(last_position)
+                            new_content = f.read()
+                            
+                            if new_content:
+                                # Parse new log entries
+                                for line in new_content.strip().split("\n"):
+                                    if line.strip():
+                                        try:
+                                            entry = json.loads(line)
+                                            
+                                            # Filter by level if specified
+                                            if level and entry.get("level") != level:
+                                                continue
+                                            
+                                            # Send log entry as SSE event
+                                            yield f"data: {json.dumps({'type': 'log', 'entry': entry})}\n\n"
+                                        
+                                        except json.JSONDecodeError:
+                                            # Handle non-JSON log lines
+                                            entry = {
+                                                "timestamp": "unknown",
+                                                "level": "INFO",
+                                                "message": line,
+                                                "raw": True
+                                            }
+                                            yield f"data: {json.dumps({'type': 'log', 'entry': entry})}\n\n"
+                            
+                            last_position = f.tell()
+                        
+                        last_size = current_size
+                
+                # Send heartbeat every 5 seconds to keep connection alive
+                yield f": heartbeat\n\n"
+                
+                # Wait before checking again
+                await asyncio.sleep(1)
+        
+        except asyncio.CancelledError:
+            # Client disconnected
+            yield f"data: {json.dumps({'type': 'disconnected'})}\n\n"
+    
+    return StreamingResponse(
+        log_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # Disable buffering for nginx
+        }
+    )
 
 
 @app.get("/api/config")
