@@ -3,6 +3,7 @@
 **ID:** `fsd-prompt-templates`
 **Priority:** High
 **Estimated Duration:** 2 hours
+**Status:** Completed
 
 ## Description
 

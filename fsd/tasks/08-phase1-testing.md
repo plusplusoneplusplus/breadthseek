@@ -3,6 +3,7 @@
 **ID:** `fsd-phase1-testing`
 **Priority:** High
 **Estimated Duration:** 3 hours
+**Status:** Completed
 
 ## Description
 

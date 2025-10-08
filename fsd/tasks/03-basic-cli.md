@@ -3,6 +3,7 @@
 **ID:** `fsd-basic-cli`
 **Priority:** High
 **Estimated Duration:** 3 hours
+**Status:** Completed
 
 ## Description
 

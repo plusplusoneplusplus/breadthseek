@@ -3,6 +3,7 @@
 **ID:** `fsd-project-setup`
 **Priority:** High
 **Estimated Duration:** 1 hour
+**Status:** Completed
 
 ## Description
 

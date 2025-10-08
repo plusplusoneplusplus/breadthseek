@@ -3,6 +3,7 @@
 **ID:** `fsd-state-machine`
 **Priority:** High
 **Estimated Duration:** 4 hours
+**Status:** Completed
 
 ## Description
 

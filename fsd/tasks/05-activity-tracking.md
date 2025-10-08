@@ -3,6 +3,7 @@
 **ID:** `fsd-activity-tracking`
 **Priority:** Medium
 **Estimated Duration:** 3 hours
+**Status:** Completed
 
 ## Description
 
