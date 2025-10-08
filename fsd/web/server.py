@@ -15,6 +15,9 @@ import asyncio
 
 from fsd.config.loader import load_config
 from fsd.core.task_schema import TaskDefinition, load_task_from_yaml, Priority, CompletionActions
+from fsd.core.state_machine import TaskStateMachine
+from fsd.core.state_persistence import StatePersistence
+from fsd.core.task_state import TaskState
 
 app = FastAPI(
     title="FSD Web Interface",
@@ -61,6 +64,23 @@ class TaskInfo(BaseModel):
     success_criteria: Optional[str] = None
 
 
+class CompletedTaskInfo(BaseModel):
+    """Extended task information for completed tasks."""
+
+    id: str
+    description: str
+    priority: str
+    estimated_duration: str
+    status: str
+    context: Optional[str] = None
+    focus_files: Optional[List[str]] = None
+    success_criteria: Optional[str] = None
+    completed_at: Optional[str] = None
+    duration_seconds: Optional[float] = None
+    retry_count: Optional[int] = None
+    error_message: Optional[str] = None
+
+
 class SystemStatus(BaseModel):
     """System status model."""
 
@@ -90,11 +110,38 @@ def is_fsd_initialized() -> bool:
     return get_fsd_dir().exists()
 
 
+def get_state_machine() -> Optional[TaskStateMachine]:
+    """Get the state machine instance."""
+    if not is_fsd_initialized():
+        return None
+
+    state_dir = get_fsd_dir() / "state"
+    if not state_dir.exists():
+        return None
+
+    try:
+        persistence = StatePersistence(state_dir=state_dir)
+        return TaskStateMachine(persistence_handler=persistence)
+    except Exception as e:
+        print(f"Warning: Failed to initialize state machine: {e}")
+        return None
+
+
 def get_task_status(task_id: str) -> str:
     """Get the status of a task."""
     if not is_fsd_initialized():
         return "unknown"
 
+    # Try to get status from state machine first
+    state_machine = get_state_machine()
+    if state_machine and state_machine.has_task(task_id):
+        try:
+            state = state_machine.get_state(task_id)
+            return state.value
+        except Exception:
+            pass
+
+    # Fall back to status file
     status_file = get_fsd_dir() / "status" / f"{task_id}.json"
 
     if not status_file.exists():
@@ -331,6 +378,102 @@ async def get_task(task_id: str) -> TaskInfo:
             )
 
     raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+
+
+@app.get("/api/tasks/completed/recent", response_model=List[CompletedTaskInfo])
+async def get_recent_completed_tasks(limit: int = 10) -> List[CompletedTaskInfo]:
+    """Get recent completed tasks with execution metadata."""
+    if not is_fsd_initialized():
+        raise HTTPException(status_code=400, detail="FSD not initialized")
+
+    state_machine = get_state_machine()
+    if not state_machine:
+        # Fall back to simple completed task list
+        tasks = get_all_tasks()
+        completed = [t for t in tasks if t["status"] in ["completed", "failed"]]
+        completed.sort(key=lambda t: t.get("modified_at", ""), reverse=True)
+
+        return [
+            CompletedTaskInfo(
+                id=t["task"].id,
+                description=t["task"].description,
+                priority=t["task"].priority.value,
+                estimated_duration=t["task"].estimated_duration,
+                status=t["status"],
+                context=t["task"].context,
+                focus_files=t["task"].focus_files,
+                success_criteria=t["task"].success_criteria,
+                completed_at=t.get("modified_at"),
+            )
+            for t in completed[:limit]
+        ]
+
+    # Get completed tasks from state machine
+    completed_tasks = []
+
+    try:
+        all_task_ids = state_machine.list_tasks()
+
+        for task_id in all_task_ids:
+            try:
+                state_info = state_machine.get_state_info(task_id)
+
+                # Only include completed or failed tasks
+                if state_info.current_state not in [TaskState.COMPLETED, TaskState.FAILED]:
+                    continue
+
+                # Load task definition
+                task_file = get_fsd_dir() / "queue" / f"{task_id}.yaml"
+                if not task_file.exists():
+                    continue
+
+                task = load_task_from_yaml(task_file)
+
+                # Extract metadata
+                metadata = state_info.metadata or {}
+                completed_at = None
+                duration_seconds = None
+
+                # Get completion timestamp from history
+                if state_info.history:
+                    last_transition = state_info.history[-1]
+                    completed_at = last_transition.timestamp.isoformat()
+
+                    # Calculate duration if we have start time
+                    if len(state_info.history) > 0:
+                        start_time = state_info.history[0].timestamp
+                        end_time = last_transition.timestamp
+                        duration_seconds = (end_time - start_time).total_seconds()
+
+                completed_tasks.append(CompletedTaskInfo(
+                    id=task.id,
+                    description=task.description,
+                    priority=task.priority.value,
+                    estimated_duration=task.estimated_duration,
+                    status=state_info.current_state.value,
+                    context=task.context,
+                    focus_files=task.focus_files,
+                    success_criteria=task.success_criteria,
+                    completed_at=completed_at,
+                    duration_seconds=duration_seconds,
+                    retry_count=metadata.get("retry_count", 0),
+                    error_message=metadata.get("error"),
+                ))
+            except Exception as e:
+                print(f"Warning: Failed to load completed task {task_id}: {e}")
+                continue
+
+        # Sort by completion time (most recent first)
+        completed_tasks.sort(
+            key=lambda t: t.completed_at or "",
+            reverse=True
+        )
+
+        return completed_tasks[:limit]
+
+    except Exception as e:
+        print(f"Error loading completed tasks: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to load completed tasks: {str(e)}")
 
 
 @app.post("/api/tasks/natural")

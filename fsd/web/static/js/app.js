@@ -342,13 +342,110 @@ async function loadActivity() {
     }
 }
 
+async function loadCompletedTasks() {
+    try {
+        const response = await fetch('/api/tasks/completed/recent?limit=5');
+        if (!response.ok) {
+            throw new Error('Failed to fetch completed tasks');
+        }
+
+        const tasks = await response.json();
+        const container = document.getElementById('completed-tasks-list');
+
+        if (tasks.length === 0) {
+            container.innerHTML = '<div style="padding: 16px; text-align: center; color: #6b7280;">No completed tasks yet</div>';
+            return;
+        }
+
+        // Helper function to format duration
+        function formatDuration(seconds) {
+            if (!seconds) return 'N/A';
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            if (hours > 0) {
+                return `${hours}h ${minutes}m`;
+            }
+            return `${minutes}m`;
+        }
+
+        // Helper function to format timestamp
+        function formatTimestamp(isoString) {
+            if (!isoString) return 'N/A';
+            const date = new Date(isoString);
+            const now = new Date();
+            const diff = now - date;
+            const hours = Math.floor(diff / 3600000);
+            const days = Math.floor(hours / 24);
+
+            if (days > 0) return `${days}d ago`;
+            if (hours > 0) return `${hours}h ago`;
+            return 'Just now';
+        }
+
+        // Render completed tasks as cards
+        container.innerHTML = tasks.map(task => {
+            const statusColor = task.status === 'completed' ? '#10b981' : '#ef4444';
+            const statusIcon = task.status === 'completed' ? '✓' : '✗';
+            const priorityColors = {
+                'critical': '#dc2626',
+                'high': '#f59e0b',
+                'medium': '#3b82f6',
+                'low': '#6b7280'
+            };
+
+            return `
+                <div class="card" style="margin-bottom: 12px; border-left: 4px solid ${statusColor};">
+                    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px;">
+                        <div style="flex: 1;">
+                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                                <span style="font-size: 20px;">${statusIcon}</span>
+                                <strong style="font-size: 16px;">${task.id}</strong>
+                                <span class="status-badge" style="background: ${priorityColors[task.priority]};">
+                                    ${task.priority}
+                                </span>
+                            </div>
+                            <div style="color: #6b7280; font-size: 14px; margin-bottom: 8px;">
+                                ${task.description}
+                            </div>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 16px; font-size: 13px; color: #6b7280;">
+                        <div>
+                            <strong>Completed:</strong> ${formatTimestamp(task.completed_at)}
+                        </div>
+                        <div>
+                            <strong>Duration:</strong> ${formatDuration(task.duration_seconds)}
+                        </div>
+                        ${task.retry_count > 0 ? `
+                            <div>
+                                <strong>Retries:</strong> ${task.retry_count}
+                            </div>
+                        ` : ''}
+                        ${task.error_message ? `
+                            <div style="color: #ef4444;">
+                                <strong>Error:</strong> ${task.error_message.substring(0, 50)}...
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+    } catch (error) {
+        console.error('Failed to load completed tasks:', error);
+        document.getElementById('completed-tasks-list').innerHTML =
+            '<div class="error">Failed to load completed tasks</div>';
+    }
+}
+
 async function refreshData() {
     try {
         // Run all loads in parallel, but don't fail if one fails
         await Promise.allSettled([
             loadSystemStatus(),
             loadTasks(),
-            loadActivity()
+            loadActivity(),
+            loadCompletedTasks()
         ]);
     } catch (error) {
         console.error('Error during refresh:', error);
