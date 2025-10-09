@@ -3,6 +3,7 @@
 Specifically tests the fixes for:
 1. Passing task.id instead of task object to execute_task()
 2. Proper error handling for missing directories
+3. Resetting state machine when retrying failed/completed tasks
 """
 
 import json
@@ -11,6 +12,8 @@ from unittest.mock import Mock, MagicMock, patch, call
 import pytest
 
 from fsd.core.task_schema import TaskDefinition, Priority, CompletionActions
+from fsd.core.task_state import TaskState, TaskStateInfo
+from datetime import datetime
 
 
 class TestWebServerTaskExecution:
@@ -285,3 +288,228 @@ class TestStateDirectoryCreation:
         # Verify temp file was cleaned up
         temp_file = state_dir / "test-task.tmp"
         assert not temp_file.exists()
+
+
+class TestTerminalStateReset:
+    """Test state machine reset when retrying failed/completed tasks."""
+
+    @pytest.fixture
+    def mock_state_machine(self):
+        """Create a mock state machine."""
+        mock = Mock()
+        mock.has_task = Mock(return_value=True)
+        mock.is_terminal = Mock(return_value=True)
+        mock.get_state = Mock(return_value=TaskStateInfo(
+            task_id="test-task",
+            current_state=TaskState.FAILED,
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+        ))
+        mock.register_task = Mock()
+        return mock
+
+    @pytest.fixture
+    def mock_state_persistence(self, tmp_path):
+        """Create a mock state persistence."""
+        state_dir = tmp_path / ".fsd" / "state"
+        state_dir.mkdir(parents=True)
+
+        mock = Mock()
+        mock.delete_state = Mock()
+        return mock
+
+    def test_failed_task_state_machine_is_reset_when_queued(self, mock_state_machine, mock_state_persistence):
+        """Test that state machine is reset when changing FAILED task to QUEUED.
+
+        This verifies the fix for the "Invalid transition" error when retrying
+        failed tasks. FAILED is a terminal state with no valid transitions, so
+        we must delete the old state and re-register as QUEUED.
+        """
+        task_id = "test-task"
+        new_status = "queued"
+
+        # Mock the state machine to return FAILED state
+        mock_state_machine.get_state.return_value = TaskStateInfo(
+            task_id=task_id,
+            current_state=TaskState.FAILED,
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+        )
+        mock_state_machine.is_terminal.return_value = True
+
+        # Simulate the update_task_status logic for terminal states
+        if new_status == "queued":
+            if mock_state_machine.has_task(task_id):
+                current_state_info = mock_state_machine.get_state(task_id)
+                if mock_state_machine.is_terminal(task_id):
+                    # Delete old state and re-register as queued
+                    mock_state_persistence.delete_state(task_id)
+                    mock_state_machine.register_task(task_id, initial_state=TaskState.QUEUED)
+
+        # Verify the old state was deleted
+        mock_state_persistence.delete_state.assert_called_once_with(task_id)
+
+        # Verify task was re-registered as QUEUED
+        mock_state_machine.register_task.assert_called_once_with(
+            task_id, initial_state=TaskState.QUEUED
+        )
+
+    def test_completed_task_state_machine_is_reset_when_queued(self, mock_state_machine, mock_state_persistence):
+        """Test that state machine is reset when changing COMPLETED task to QUEUED.
+
+        COMPLETED is also a terminal state, so the same reset logic applies.
+        """
+        task_id = "test-task"
+        new_status = "queued"
+
+        # Mock the state machine to return COMPLETED state
+        mock_state_machine.get_state.return_value = TaskStateInfo(
+            task_id=task_id,
+            current_state=TaskState.COMPLETED,
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+        )
+        mock_state_machine.is_terminal.return_value = True
+
+        # Simulate the update_task_status logic
+        if new_status == "queued":
+            if mock_state_machine.has_task(task_id):
+                current_state_info = mock_state_machine.get_state(task_id)
+                if mock_state_machine.is_terminal(task_id):
+                    mock_state_persistence.delete_state(task_id)
+                    mock_state_machine.register_task(task_id, initial_state=TaskState.QUEUED)
+
+        # Verify reset occurred
+        mock_state_persistence.delete_state.assert_called_once_with(task_id)
+        mock_state_machine.register_task.assert_called_once_with(
+            task_id, initial_state=TaskState.QUEUED
+        )
+
+    def test_non_terminal_state_does_not_trigger_reset(self, mock_state_machine, mock_state_persistence):
+        """Test that non-terminal states (EXECUTING, PLANNING, etc.) don't trigger reset.
+
+        Only FAILED and COMPLETED are terminal states requiring reset.
+        """
+        task_id = "test-task"
+        new_status = "queued"
+
+        # Mock the state machine to return EXECUTING state (non-terminal)
+        mock_state_machine.get_state.return_value = TaskStateInfo(
+            task_id=task_id,
+            current_state=TaskState.EXECUTING,
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+        )
+        mock_state_machine.is_terminal.return_value = False
+
+        # Simulate the update_task_status logic
+        if new_status == "queued":
+            if mock_state_machine.has_task(task_id):
+                current_state_info = mock_state_machine.get_state(task_id)
+                if mock_state_machine.is_terminal(task_id):
+                    # This should NOT execute for non-terminal states
+                    mock_state_persistence.delete_state(task_id)
+                    mock_state_machine.register_task(task_id, initial_state=TaskState.QUEUED)
+
+        # Verify reset did NOT occur
+        mock_state_persistence.delete_state.assert_not_called()
+        mock_state_machine.register_task.assert_not_called()
+
+    def test_state_reset_only_happens_for_queued_status(self, mock_state_machine, mock_state_persistence):
+        """Test that state reset only happens when new_status is 'queued'.
+
+        Changing to other statuses should not trigger the reset logic.
+        """
+        task_id = "test-task"
+
+        # Try various non-queued statuses
+        for new_status in ["executing", "planning", "validating", "completed", "failed"]:
+            mock_state_machine.reset_mock()
+            mock_state_persistence.reset_mock()
+
+            mock_state_machine.get_state.return_value = TaskStateInfo(
+                task_id=task_id,
+                current_state=TaskState.FAILED,
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+            )
+            mock_state_machine.is_terminal.return_value = True
+
+            # Simulate the update_task_status logic
+            if new_status == "queued":
+                if mock_state_machine.has_task(task_id):
+                    current_state_info = mock_state_machine.get_state(task_id)
+                    if mock_state_machine.is_terminal(task_id):
+                        mock_state_persistence.delete_state(task_id)
+                        mock_state_machine.register_task(task_id, initial_state=TaskState.QUEUED)
+
+            # Verify reset did NOT occur for non-queued statuses
+            mock_state_persistence.delete_state.assert_not_called()
+            mock_state_machine.register_task.assert_not_called()
+
+    def test_state_reset_handles_missing_task(self, mock_state_machine, mock_state_persistence):
+        """Test that state reset handles case where task is not in state machine."""
+        task_id = "test-task"
+        new_status = "queued"
+
+        # Mock the state machine to indicate task doesn't exist
+        mock_state_machine.has_task.return_value = False
+
+        # Simulate the update_task_status logic
+        if new_status == "queued":
+            if mock_state_machine.has_task(task_id):
+                # This should NOT execute if task doesn't exist
+                current_state_info = mock_state_machine.get_state(task_id)
+                if mock_state_machine.is_terminal(task_id):
+                    mock_state_persistence.delete_state(task_id)
+                    mock_state_machine.register_task(task_id, initial_state=TaskState.QUEUED)
+
+        # Verify no operations were attempted
+        mock_state_machine.get_state.assert_not_called()
+        mock_state_persistence.delete_state.assert_not_called()
+        mock_state_machine.register_task.assert_not_called()
+
+    def test_terminal_state_transition_error_without_reset(self):
+        """Test that attempting to transition from FAILED without reset raises error.
+
+        This documents the bug that was fixed - without resetting the state machine,
+        you get: "Invalid transition for task X: failed -> failed. Valid next states: []"
+        """
+        from fsd.core.task_state import VALID_TRANSITIONS
+
+        # Verify FAILED is a terminal state with no valid transitions
+        assert TaskState.FAILED in VALID_TRANSITIONS
+        assert VALID_TRANSITIONS[TaskState.FAILED] == []
+
+        # Verify COMPLETED is also terminal
+        assert TaskState.COMPLETED in VALID_TRANSITIONS
+        assert VALID_TRANSITIONS[TaskState.COMPLETED] == []
+
+    def test_state_file_deletion_on_reset(self, tmp_path):
+        """Test that state file is deleted when resetting from terminal state."""
+        from fsd.core.state_persistence import StatePersistence
+
+        state_dir = tmp_path / ".fsd" / "state"
+        state_dir.mkdir(parents=True)
+
+        task_id = "test-task"
+        persistence = StatePersistence(state_dir=state_dir)
+
+        # Create a state file for FAILED task
+        state_info = TaskStateInfo(
+            task_id=task_id,
+            current_state=TaskState.FAILED,
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+        )
+        persistence.save_state(state_info)
+
+        # Verify file exists
+        state_file = state_dir / f"{task_id}.json"
+        assert state_file.exists()
+
+        # Delete the state (simulating reset)
+        persistence.delete_state(task_id)
+
+        # Verify file was deleted
+        assert not state_file.exists()

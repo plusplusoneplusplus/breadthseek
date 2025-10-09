@@ -637,6 +637,26 @@ async def update_task_status(task_id: str, new_status: str) -> Dict[str, Any]:
         with open(status_file, "w", encoding="utf-8") as f:
             json.dump(status_data, f, indent=2)
 
+        # Reset state machine if changing to queued (for retrying failed tasks)
+        if new_status == "queued":
+            state_machine = get_state_machine()
+            if state_machine and state_machine.has_task(task_id):
+                # Get current state
+                try:
+                    current_state_info = state_machine.get_state(task_id)
+                    # If task is in a terminal state (failed/completed), reset it
+                    if state_machine.is_terminal(task_id):
+                        # Delete old state and re-register as queued
+                        state_persistence = StatePersistence(state_dir=fsd_dir / "state")
+                        state_persistence.delete_state(task_id)
+                        # Re-register in the state machine
+                        state_machine = get_state_machine()
+                        if state_machine:
+                            state_machine.register_task(task_id, initial_state=TaskState.QUEUED)
+                except Exception as e:
+                    # Log but don't fail - status file was already updated
+                    print(f"Warning: Failed to reset state machine for {task_id}: {e}")
+
         return {
             "success": True,
             "message": f"Task '{task_id}' status updated to '{new_status}'",
