@@ -199,7 +199,8 @@ class PromptLoader:
             ) from e
 
         # Extract variables from template
-        variables = re.findall(r"\{([^}]+)\}", content)
+        # Match {variable} but not {{double}} braces (used for literal braces in examples)
+        variables = re.findall(r"(?<!\{)\{([^{}]+)\}(?!\})", content)
 
         # Categorize variables
         required_vars = []

@@ -146,7 +146,7 @@ def get_task_status(task_id: str) -> str:
     if state_machine and state_machine.has_task(task_id):
         try:
             state = state_machine.get_state(task_id)
-            return state.value
+            return state.current_state.value
         except Exception:
             pass
 
@@ -838,7 +838,17 @@ def auto_execution_loop():
             tasks = get_all_tasks()
             queued_tasks = [t for t in tasks if t["status"] == "queued"]
             running_tasks = [t for t in tasks if t["status"] == "running"]
-            
+
+            # Filter out tasks in terminal states (failed/completed)
+            # This prevents re-execution of tasks that failed or completed
+            state_machine = get_state_machine()
+            if state_machine:
+                queued_tasks = [
+                    t for t in queued_tasks
+                    if not (state_machine.has_task(t["task"].id) and
+                           state_machine.is_terminal(t["task"].id))
+                ]
+
             # If there are queued tasks and no running tasks, start execution
             if queued_tasks and not running_tasks:
                 print(f"Auto-execution: Found {len(queued_tasks)} queued task(s), starting execution...")
