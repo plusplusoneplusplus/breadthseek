@@ -8,6 +8,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from functools import lru_cache
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
@@ -37,6 +38,33 @@ app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 # Auto-execution flag and thread
 auto_execution_enabled = False
 auto_execution_thread = None
+
+# Performance optimization: Simple time-based cache
+_cache = {}
+_cache_ttl = 2.0  # seconds
+
+def cached_with_ttl(ttl_seconds: float = 2.0):
+    """Simple TTL-based cache decorator for expensive operations."""
+    def decorator(func):
+        cache_key = func.__name__
+
+        def wrapper(*args, **kwargs):
+            global _cache
+            now = time.time()
+
+            # Check if we have a valid cached result
+            if cache_key in _cache:
+                cached_result, cached_time = _cache[cache_key]
+                if now - cached_time < ttl_seconds:
+                    return cached_result
+
+            # Execute function and cache result
+            result = func(*args, **kwargs)
+            _cache[cache_key] = (result, now)
+            return result
+
+        return wrapper
+    return decorator
 
 
 # Request models
@@ -164,6 +192,7 @@ def get_task_status(task_id: str) -> str:
         return "queued"
 
 
+@cached_with_ttl(ttl_seconds=2.0)
 def get_all_tasks() -> List[Dict[str, Any]]:
     """Get all tasks with their status."""
     if not is_fsd_initialized():
@@ -232,6 +261,7 @@ def get_all_tasks() -> List[Dict[str, Any]]:
     return tasks
 
 
+@cached_with_ttl(ttl_seconds=2.0)
 def get_activity_logs(limit: int = 50) -> List[ActivityEvent]:
     """Get recent activity logs."""
     if not is_fsd_initialized():

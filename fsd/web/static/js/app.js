@@ -4,7 +4,20 @@ let currentFilter = 'all';
 let allTasks = [];
 let isInitialized = false;
 
+// Cache for previous data to avoid unnecessary DOM updates
+let cachedData = {
+    status: null,
+    tasks: null,
+    activity: null,
+    completedTasks: null,
+    systemLogs: null
+};
+
 // Utility Functions
+function deepEqual(obj1, obj2) {
+    return JSON.stringify(obj1) === JSON.stringify(obj2);
+}
+
 async function fetchData(endpoint, timeout = 10000) {
     // Create abort controller for timeout
     const controller = new AbortController();
@@ -109,6 +122,12 @@ async function loadSystemStatus() {
     try {
         const status = await fetchData('/status');
 
+        // Check if data has changed
+        if (deepEqual(status, cachedData.status)) {
+            return; // No changes, skip DOM update
+        }
+        cachedData.status = status;
+
         // Check if FSD is initialized
         isInitialized = status.fsd_initialized;
 
@@ -184,16 +203,20 @@ async function loadTasks() {
     if (!isInitialized) return;
 
     try {
-        // Show loading indicator
-        document.getElementById('tasks-list').innerHTML = '<div class="loading">Loading tasks...</div>';
-        
-        allTasks = await fetchData('/tasks');
-        
+        const tasks = await fetchData('/tasks');
+
         // Check if we got valid data
-        if (!Array.isArray(allTasks)) {
+        if (!Array.isArray(tasks)) {
             throw new Error('Invalid response format');
         }
-        
+
+        // Check if data has changed
+        if (deepEqual(tasks, cachedData.tasks)) {
+            return; // No changes, skip DOM update
+        }
+        cachedData.tasks = tasks;
+        allTasks = tasks;
+
         renderTasks();
     } catch (error) {
         console.error('Failed to load tasks:', error);
@@ -322,6 +345,12 @@ async function loadActivity() {
     try {
         const activity = await fetchData('/activity?limit=20');
 
+        // Check if data has changed
+        if (deepEqual(activity, cachedData.activity)) {
+            return; // No changes, skip DOM update
+        }
+        cachedData.activity = activity;
+
         if (activity.length === 0) {
             document.getElementById('activity-list').innerHTML = `
                 <div class="empty-state">
@@ -360,6 +389,13 @@ async function loadCompletedTasks() {
         }
 
         const tasks = await response.json();
+
+        // Check if data has changed
+        if (deepEqual(tasks, cachedData.completedTasks)) {
+            return; // No changes, skip DOM update
+        }
+        cachedData.completedTasks = tasks;
+
         const container = document.getElementById('completed-tasks-list');
 
         if (tasks.length === 0) {
@@ -961,18 +997,24 @@ let logStreamEventSource = null;
 
 async function loadSystemLogs() {
     if (!isInitialized) return;
-    
+
     try {
         const levelFilter = document.getElementById('log-level-filter').value;
         const params = new URLSearchParams({ lines: 200 });
         if (levelFilter) {
             params.append('level', levelFilter);
         }
-        
+
         const data = await fetchData(`/logs?${params}`);
-        
+
+        // Check if data has changed
+        if (deepEqual(data, cachedData.systemLogs)) {
+            return; // No changes, skip DOM update
+        }
+        cachedData.systemLogs = data;
+
         const container = document.getElementById('logs-container');
-        
+
         if (!data.logs || data.logs.length === 0) {
             container.innerHTML = '<div style="color: #9ca3af;">No logs available</div>';
             return;
