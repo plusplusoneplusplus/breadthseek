@@ -1,6 +1,7 @@
 """Tests for AI task parser."""
 
 import os
+import subprocess
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 
@@ -155,3 +156,26 @@ Here's the parsed task:
         assert task.id == "fix-authentication-bug"
         assert task.description == "Fix authentication bug in login system"
         assert task.priority == Priority.MEDIUM
+
+    @patch("fsd.core.ai_task_parser.subprocess.Popen")
+    def test_parse_subprocess_timeout(self, mock_popen):
+        """Test handling of subprocess timeout."""
+        # Mock subprocess that times out
+        mock_process = MagicMock()
+        mock_process.communicate.side_effect = [
+            subprocess.TimeoutExpired("claude", 30),
+            ("", ""),  # Return value after kill()
+        ]
+        mock_popen.return_value = mock_process
+
+        # Parse task should raise AITaskParserError with timeout message
+        parser = AITaskParser()
+        with pytest.raises(AITaskParserError) as exc_info:
+            parser.parse_task("Fix authentication bug", timeout=30)
+
+        # Verify error message mentions timeout
+        assert "timed out" in str(exc_info.value).lower()
+        assert "30" in str(exc_info.value)
+
+        # Verify process.kill() was called
+        mock_process.kill.assert_called_once()

@@ -16,6 +16,7 @@ from fsd.core.task_schema import (
     load_task_from_yaml,
 )
 from fsd.core.ai_task_parser import AITaskParser, AITaskParserError
+from fsd.core.task_sequence import get_next_task_id
 
 console = Console()
 
@@ -155,6 +156,8 @@ def _display_task_summary(task: TaskDefinition) -> None:
     """Display a summary of the task."""
     console.print("\n[bold]Task Summary:[/bold]")
     console.print(f"[dim]ID:[/dim] {task.id}")
+    if task.numeric_id is not None:
+        console.print(f"[dim]Numeric ID:[/dim] #{task.numeric_id}")
     console.print(f"[dim]Priority:[/dim] {task.priority.value}")
     console.print(f"[dim]Duration:[/dim] {task.estimated_duration}")
     console.print(f"[dim]Description:[/dim]")
@@ -195,6 +198,11 @@ def _submit_task(task: TaskDefinition) -> None:
     task_file = queue_dir / f"{task.id}.yaml"
     if task_file.exists():
         raise click.ClickException(f"Task '{task.id}' already exists in queue")
+
+    # Assign sequential numeric ID if not already set
+    if task.numeric_id is None:
+        task.numeric_id = get_next_task_id(fsd_dir)
+        console.print(f"[dim]Assigned numeric ID: {task.numeric_id}[/dim]")
 
     # Convert task to dict and save
     task_dict = task.model_dump(exclude_none=True, mode="json")

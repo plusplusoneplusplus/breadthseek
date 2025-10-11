@@ -25,6 +25,7 @@ from fsd.orchestrator.phase_executor import PhaseExecutor
 from fsd.core.claude_executor import ClaudeExecutor
 from fsd.core.checkpoint_manager import CheckpointManager
 from fsd.core.ai_task_parser import AITaskParser, AITaskParserError
+from fsd.core.task_sequence import get_next_task_id
 
 app = FastAPI(
     title="FSD Web Interface",
@@ -93,6 +94,7 @@ class TaskInfo(BaseModel):
     """Task information model."""
 
     id: str
+    numeric_id: Optional[int] = None
     description: str
     priority: str
     estimated_duration: str
@@ -106,6 +108,7 @@ class CompletedTaskInfo(BaseModel):
     """Extended task information for completed tasks."""
 
     id: str
+    numeric_id: Optional[int] = None
     description: str
     priority: str
     estimated_duration: str
@@ -384,6 +387,7 @@ async def list_tasks(status: Optional[str] = None) -> List[TaskInfo]:
         return [
             TaskInfo(
                 id=t["task"].id,
+                numeric_id=t["task"].numeric_id,
                 description=t["task"].description,
                 priority=t["task"].priority.value,
                 estimated_duration=t["task"].estimated_duration,
@@ -411,6 +415,7 @@ async def get_task(task_id: str) -> TaskInfo:
         if task_info["task"].id == task_id:
             return TaskInfo(
                 id=task_info["task"].id,
+                numeric_id=task_info["task"].numeric_id,
                 description=task_info["task"].description,
                 priority=task_info["task"].priority.value,
                 estimated_duration=task_info["task"].estimated_duration,
@@ -439,6 +444,7 @@ async def get_recent_completed_tasks(limit: int = 10) -> List[CompletedTaskInfo]
         return [
             CompletedTaskInfo(
                 id=t["task"].id,
+                numeric_id=t["task"].numeric_id,
                 description=t["task"].description,
                 priority=t["task"].priority.value,
                 estimated_duration=t["task"].estimated_duration,
@@ -488,6 +494,7 @@ async def get_recent_completed_tasks(limit: int = 10) -> List[CompletedTaskInfo]
 
                 completed_tasks.append(CompletedTaskInfo(
                     id=task.id,
+                    numeric_id=task.numeric_id,
                     description=task.description,
                     priority=task.priority.value,
                     estimated_duration=task.estimated_duration,
@@ -532,6 +539,7 @@ async def create_task_from_natural_language(request: CreateTaskNaturalLanguage) 
             "message": f"Task '{task.id}' created successfully",
             "task": TaskInfo(
                 id=task.id,
+                numeric_id=task.numeric_id,
                 description=task.description,
                 priority=task.priority.value,
                 estimated_duration=task.estimated_duration,
@@ -580,6 +588,7 @@ async def create_task_from_structured(request: CreateTaskStructured) -> Dict[str
             "message": f"Task '{task.id}' created successfully",
             "task": TaskInfo(
                 id=task.id,
+                numeric_id=task.numeric_id,
                 description=task.description,
                 priority=task.priority.value,
                 estimated_duration=task.estimated_duration,
@@ -1708,6 +1717,10 @@ def _submit_task(task: TaskDefinition) -> None:
     task_file = queue_dir / f"{task.id}.yaml"
     if task_file.exists():
         raise ValueError(f"Task '{task.id}' already exists in queue")
+
+    # Assign sequential numeric ID if not already set
+    if task.numeric_id is None:
+        task.numeric_id = get_next_task_id(fsd_dir)
 
     # Convert task to dict and save
     task_dict = task.model_dump(exclude_none=True, mode="json")

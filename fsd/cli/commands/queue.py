@@ -60,6 +60,7 @@ def list_command(status: str) -> None:
 
         # Create table
         table = Table(title="Task Queue")
+        table.add_column("#", style="dim cyan", no_wrap=True)
         table.add_column("ID", style="cyan", no_wrap=True)
         table.add_column("Priority", style="magenta")
         table.add_column("Duration", style="green")
@@ -82,7 +83,11 @@ def list_command(status: str) -> None:
                 "failed": "[red]failed[/red]",
             }.get(task_status, task_status)
 
+            # Display numeric ID if available
+            numeric_id = str(task_info["task"].numeric_id) if task_info["task"].numeric_id else "-"
+
             table.add_row(
+                numeric_id,
                 task_info["task"].id,
                 task_info["task"].priority.value,
                 task_info["task"].estimated_duration,
@@ -279,6 +284,129 @@ def _execute_task(task: TaskDefinition, mode: str) -> None:
 
     # For now, mark as completed
     _update_task_status(task.id, "completed")
+
+
+@queue_group.command("retry")
+@click.argument("task_id", required=False)
+@click.option(
+    "--all-failed",
+    is_flag=True,
+    help="Retry all failed tasks",
+)
+def retry_command(task_id: str, all_failed: bool) -> None:
+    """Retry failed tasks.
+
+    Resets the status of failed tasks back to queued so they can be executed again.
+
+    Examples:
+        fsd queue retry my-task         # Retry specific task
+        fsd queue retry --all-failed    # Retry all failed tasks
+    """
+    try:
+        if not task_id and not all_failed:
+            raise click.ClickException(
+                "Must provide either a task ID or use --all-failed flag"
+            )
+
+        if task_id and all_failed:
+            raise click.ClickException(
+                "Cannot use both task ID and --all-failed flag"
+            )
+
+        fsd_dir = Path.cwd() / ".fsd"
+        if not fsd_dir.exists():
+            raise click.ClickException("FSD not initialized. Run 'fsd init' first.")
+
+        if all_failed:
+            # Retry all failed tasks
+            tasks = _get_all_tasks()
+            failed_tasks = [t for t in tasks if t["status"] == "failed"]
+
+            if not failed_tasks:
+                console.print("[yellow]No failed tasks found[/yellow]")
+                return
+
+            console.print(f"[blue]Retrying {len(failed_tasks)} failed task(s)[/blue]")
+
+            retry_count = 0
+            for task_info in failed_tasks:
+                if _retry_task(task_info["task"].id):
+                    console.print(f"[green]✓[/green] Reset {task_info['task'].id} to queued")
+                    retry_count += 1
+                else:
+                    console.print(f"[red]✗[/red] Failed to reset {task_info['task'].id}")
+
+            console.print(f"\n[green]✓[/green] Reset {retry_count} task(s) to queued")
+
+        else:
+            # Retry specific task
+            task_status = _get_task_status(task_id)
+
+            if task_status != "failed":
+                console.print(
+                    f"[yellow]Warning: Task '{task_id}' is not in failed state "
+                    f"(current: {task_status})[/yellow]"
+                )
+                if not click.confirm("Do you want to retry it anyway?"):
+                    return
+
+            if _retry_task(task_id):
+                console.print(f"[green]✓[/green] Task '{task_id}' reset to queued")
+            else:
+                raise click.ClickException(f"Failed to retry task '{task_id}'")
+
+    except Exception as e:
+        console.print(f"[red]Failed to retry task(s):[/red] {e}")
+        raise click.ClickException(f"Retry failed: {e}")
+
+
+def _retry_task(task_id: str) -> bool:
+    """Reset a task's status and state back to queued.
+
+    Args:
+        task_id: Task identifier
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        from datetime import datetime
+
+        fsd_dir = Path.cwd() / ".fsd"
+
+        # Reset status file
+        status_file = fsd_dir / "status" / f"{task_id}.json"
+        if status_file.exists():
+            status_data = {
+                "status": "queued",
+                "updated_at": datetime.utcnow().isoformat(),
+                "mode": "auto"
+            }
+            with open(status_file, "w", encoding="utf-8") as f:
+                json.dump(status_data, f, indent=2)
+
+        # Reset state file
+        state_file = fsd_dir / "state" / f"{task_id}.json"
+        if state_file.exists():
+            now = datetime.utcnow().isoformat()
+            state_data = {
+                "task_id": task_id,
+                "current_state": "queued",
+                "created_at": now,
+                "updated_at": now,
+                "history": [],
+                "error_message": None,
+                "retry_count": 0,
+                "metadata": {}
+            }
+            with open(state_file, "w", encoding="utf-8") as f:
+                json.dump(state_data, f, indent=2)
+
+        return True
+
+    except Exception as e:
+        console.print(f"[red]Error resetting task {task_id}: {e}[/red]")
+        return False
 
 
 def _update_task_status(task_id: str, status: str) -> None:

@@ -44,6 +44,11 @@ def init_command(force: bool) -> None:
         (fsd_dir / "logs").mkdir(exist_ok=True)
         (fsd_dir / "tasks").mkdir(exist_ok=True)
         (fsd_dir / "reports").mkdir(exist_ok=True)
+        (fsd_dir / "queue").mkdir(exist_ok=True)
+        (fsd_dir / "state").mkdir(exist_ok=True)
+        (fsd_dir / "status").mkdir(exist_ok=True)
+        (fsd_dir / "checkpoints").mkdir(exist_ok=True)
+        (fsd_dir / "plans").mkdir(exist_ok=True)
 
         # Create default config
         config_path = fsd_dir / "config.yaml"
@@ -58,6 +63,11 @@ def init_command(force: bool) -> None:
             gitignore_content = """# FSD generated files
 logs/
 reports/
+queue/
+state/
+status/
+checkpoints/
+plans/
 *.tmp
 *.lock
 """

@@ -31,6 +31,7 @@ class TaskDefinition(BaseModel):
     """Task definition model."""
 
     id: str = Field(..., description="Unique task identifier")
+    numeric_id: Optional[int] = Field(None, description="Sequential numeric identifier")
     description: str = Field(..., description="Natural language task description")
     priority: Priority = Field(..., description="Task priority level")
     estimated_duration: str = Field(
