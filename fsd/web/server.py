@@ -24,6 +24,7 @@ from fsd.core.task_state import TaskState
 from fsd.orchestrator.phase_executor import PhaseExecutor
 from fsd.core.claude_executor import ClaudeExecutor
 from fsd.core.checkpoint_manager import CheckpointManager
+from fsd.core.ai_task_parser import AITaskParser, AITaskParserError
 
 app = FastAPI(
     title="FSD Web Interface",
@@ -1645,176 +1646,19 @@ def _submit_task(task: TaskDefinition) -> None:
 
 
 def _create_task_from_text(text: str) -> TaskDefinition:
-    """Create a task from natural language text."""
-    # Extract priority
-    priority, text_without_priority = _extract_priority(text)
+    """Create a task from natural language text using AI parsing.
 
-    # Extract duration
-    duration, text_without_duration = _extract_duration(text_without_priority)
+    Args:
+        text: Natural language task description
 
-    # Extract focus files
-    focus_files, clean_description = _extract_focus_files(text_without_duration)
+    Returns:
+        TaskDefinition parsed with AI
 
-    # Generate task ID from description
-    task_id = _generate_task_id(clean_description)
-
-    # Build task
-    task = TaskDefinition(
-        id=task_id,
-        description=clean_description.strip(),
-        priority=priority,
-        estimated_duration=duration,
-        focus_files=focus_files if focus_files else None,
-        on_completion=CompletionActions(
-            create_pr=True,
-            pr_title=_generate_pr_title(clean_description)
-        )
-    )
-
-    return task
-
-
-def _extract_priority(text: str) -> Tuple[Priority, str]:
-    """Extract priority from text."""
-    text_upper = text.upper()
-
-    # Check for priority keywords
-    priority_patterns = [
-        (r'\b(CRITICAL|CRIT)\b[:\s]?', Priority.CRITICAL),
-        (r'\b(HIGH|URGENT)\b[:\s]?', Priority.HIGH),
-        (r'\b(MEDIUM|MED|NORMAL)\b[:\s]?', Priority.MEDIUM),
-        (r'\b(LOW)\b[:\s]?', Priority.LOW),
-    ]
-
-    for pattern, priority in priority_patterns:
-        match = re.search(pattern, text_upper)
-        if match:
-            # Remove priority keyword from text
-            text = text[:match.start()] + text[match.end():]
-            return priority, text.strip()
-
-    # Default to medium priority
-    return Priority.MEDIUM, text
-
-
-def _extract_duration(text: str) -> Tuple[str, str]:
-    """Extract duration from text."""
-    # Patterns for duration: "30m", "2h", "1h30m", "takes 2h", "should take 30m"
-    duration_patterns = [
-        r'\b(?:takes?|should take|needs?|requires?)\s+(\d+h(?:\d+m)?|\d+m)\b',
-        r'\b(\d+h(?:\d+m)?|\d+m)\b',
-    ]
-
-    for pattern in duration_patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            duration = match.group(1) if match.lastindex else match.group(0)
-            # Clean up duration to just the time part
-            duration = re.search(r'(\d+h(?:\d+m)?|\d+m)', duration).group(1)
-            # Remove duration from text
-            text = text[:match.start()] + text[match.end():]
-            return duration.lower(), text.strip()
-
-    # Default duration estimation based on text length
-    return _estimate_duration(text), text
-
-
-def _estimate_duration(text: str) -> str:
-    """Estimate duration based on text complexity."""
-    word_count = len(text.split())
-
-    # Simple heuristic based on word count and keywords
-    keywords_long = ['implement', 'refactor', 'migrate', 'design', 'architecture']
-    keywords_short = ['fix', 'update', 'change', 'add']
-
-    text_lower = text.lower()
-
-    if any(keyword in text_lower for keyword in keywords_long) or word_count > 30:
-        return "2h"
-    elif any(keyword in text_lower for keyword in keywords_short) or word_count > 15:
-        return "1h"
-    else:
-        return "30m"
-
-
-def _extract_focus_files(text: str) -> Tuple[Optional[List[str]], str]:
-    """Extract file paths from text."""
-    # Pattern for files: explicit "files:" or common extensions
-    files = []
-
-    # Check for explicit "files:" mentions
-    files_pattern = r'(?:files?)\s*[:\s]\s*([a-zA-Z0-9_/\-.,\s]+\.(?:py|js|ts|tsx|jsx|java|go|rs|yaml|yml|json|md)(?:\s*,\s*[a-zA-Z0-9_/\-]+\.(?:py|js|ts|tsx|jsx|java|go|rs|yaml|yml|json|md))*)'
-    match = re.search(files_pattern, text, re.IGNORECASE)
-
-    if match:
-        files_str = match.group(1)
-        # Split by comma and clean up
-        files = [f.strip() for f in re.split(r'[,\s]+', files_str) if '.' in f]
-        # Remove from text
-        text = text[:match.start()] + text[match.end():]
-    else:
-        # Look for file mentions with common extensions (but keep them in description)
-        file_pattern = r'\b([a-zA-Z0-9_/\-]+\.(?:py|js|ts|tsx|jsx|java|go|rs|yaml|yml|json|md))\b'
-        matches = re.finditer(file_pattern, text)
-
-        for match in matches:
-            files.append(match.group(1))
-
-        # Don't remove file mentions from text - they're part of the description
-        # Just clean up extra spaces
-        text = re.sub(r'\s+', ' ', text)
-
-    return files if files else None, text.strip()
-
-
-def _generate_task_id(description: str) -> str:
-    """Generate a task ID from description."""
-    # Take first significant words (up to 5)
-    words = re.findall(r'\b[a-zA-Z]+\b', description.lower())
-
-    # Filter out common words
-    stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
-    significant_words = [w for w in words if w not in stop_words][:5]
-
-    # Join with hyphens
-    task_id = '-'.join(significant_words)
-
-    # Ensure minimum length
-    if len(task_id) < 3:
-        task_id = 'task-' + task_id
-
-    # Truncate if too long
-    if len(task_id) > 50:
-        task_id = task_id[:50].rstrip('-')
-
-    return task_id
-
-
-def _generate_pr_title(description: str) -> str:
-    """Generate a PR title from description."""
-    # Take first sentence or first 60 chars
-    first_sentence = description.split('.')[0].strip()
-
-    # Detect conventional commit type
-    text_lower = first_sentence.lower()
-    if 'fix' in text_lower or 'bug' in text_lower:
-        prefix = "fix: "
-    elif 'refactor' in text_lower:
-        prefix = "refactor: "
-    elif 'test' in text_lower:
-        prefix = "test: "
-    elif 'doc' in text_lower:
-        prefix = "docs: "
-    else:
-        prefix = "feat: "
-
-    title = prefix + first_sentence
-
-    # Truncate if too long
-    if len(title) > 72:
-        title = title[:69] + "..."
-
-    return title
+    Raises:
+        AITaskParserError: If AI parsing fails
+    """
+    parser = AITaskParser()
+    return parser.parse_task(text)
 
 
 def run_server(host: str = "127.0.0.1", port: int = 10010, reload: bool = False) -> None:
