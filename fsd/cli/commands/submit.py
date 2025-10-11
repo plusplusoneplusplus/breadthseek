@@ -15,6 +15,7 @@ from fsd.core.task_schema import (
     CompletionActions,
     load_task_from_yaml,
 )
+from fsd.core.ai_task_parser import AITaskParser, AITaskParserError
 
 console = Console()
 
@@ -26,7 +27,8 @@ console = Console()
 @click.option("--interactive", "-i", is_flag=True, help="Create task interactively")
 @click.option("--dry-run", "-n", is_flag=True, help="Validate task without submitting")
 @click.option("--text", "-t", "task_text", type=str, help="Create task from natural language text")
-def submit_command(task_file: Optional[Path], interactive: bool, dry_run: bool, task_text: Optional[str]) -> None:
+@click.option("--ai", is_flag=True, help="Use AI (Claude) to parse natural language (requires ANTHROPIC_API_KEY)")
+def submit_command(task_file: Optional[Path], interactive: bool, dry_run: bool, task_text: Optional[str], ai: bool) -> None:
     """Submit a task for execution.
 
     You can either provide a YAML task file, use --interactive mode,
@@ -36,6 +38,7 @@ def submit_command(task_file: Optional[Path], interactive: bool, dry_run: bool, 
         fsd submit task.yaml        # Submit from file
         fsd submit --interactive    # Interactive creation
         fsd submit --text "HIGH priority: Fix login bug in auth.py. Should take 30m"
+        fsd submit --text "Fix login bug" --ai  # Use AI parsing (better understanding)
         fsd submit task.yaml --dry-run  # Validate only
     """
     # Validate mutually exclusive options
@@ -48,11 +51,18 @@ def submit_command(task_file: Optional[Path], interactive: bool, dry_run: bool, 
             "Must provide either a task file, use --interactive mode, or use --text"
         )
 
+    # Validate --ai flag usage
+    if ai and not task_text:
+        raise click.ClickException("--ai flag can only be used with --text")
+
     try:
         if interactive:
             task = _create_task_interactively()
         elif task_text:
-            task = _create_task_from_text(task_text)
+            if ai:
+                task = _create_task_from_text_ai(task_text)
+            else:
+                task = _create_task_from_text(task_text)
         else:
             task = load_task_from_yaml(task_file)
 
@@ -238,6 +248,36 @@ def _create_task_from_text(text: str) -> TaskDefinition:
     )
 
     return task
+
+
+def _create_task_from_text_ai(text: str) -> TaskDefinition:
+    """Create a task from natural language text using AI (Claude).
+
+    Args:
+        text: Natural language task description
+
+    Returns:
+        TaskDefinition created from parsed text using AI
+
+    Raises:
+        click.ClickException: If AI parsing fails
+
+    Examples:
+        "Fix the login authentication bug that happens when users have special characters in passwords"
+        "Implement a caching layer for the API with Redis. Should improve performance by 50%. Focus on /api/v1/users endpoint"
+    """
+    console.print("[dim]Using AI to parse task...[/dim]")
+
+    try:
+        parser = AITaskParser()
+        task = parser.parse_task(text)
+        console.print("[green]✓[/green] AI parsing successful")
+        return task
+
+    except AITaskParserError as e:
+        console.print(f"[red]AI parsing failed:[/red] {e}")
+        console.print("[yellow]Tip:[/yellow] Make sure ANTHROPIC_API_KEY is set in your environment")
+        raise click.ClickException(f"AI task parsing failed: {e}")
 
 
 def _extract_priority(text: str) -> Tuple[Priority, str]:
