@@ -1,13 +1,17 @@
-"""AI-powered task parser using Claude API.
+"""AI-powered task parser using Claude CLI.
 
-This module uses Claude to parse natural language task descriptions
+This module uses the Claude CLI to parse natural language task descriptions
 into structured TaskDefinition objects with better understanding than regex.
+
+IMPORTANT: This module uses the `claude` CLI command, NOT the Python SDK.
+This ensures we use the same authentication method as the rest of the system.
 """
 
 import json
+import re
+import subprocess
+from pathlib import Path
 from typing import Optional
-
-from anthropic import Anthropic
 
 from .task_schema import TaskDefinition, Priority, CompletionActions
 from .exceptions import ExecutionError
@@ -20,21 +24,24 @@ class AITaskParserError(ExecutionError):
 
 
 class AITaskParser:
-    """Parse natural language task descriptions using Claude AI."""
+    """Parse natural language task descriptions using Claude CLI."""
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, command: str = "claude", working_dir: Optional[Path] = None):
         """Initialize AI task parser.
 
         Args:
-            api_key: Anthropic API key (reads from environment if None)
+            command: Claude CLI command (default: "claude")
+            working_dir: Working directory for command execution
         """
-        self.client = Anthropic(api_key=api_key)
+        self.command = command
+        self.working_dir = Path(working_dir) if working_dir else Path.cwd()
 
-    def parse_task(self, text: str) -> TaskDefinition:
+    def parse_task(self, text: str, timeout: int = 30) -> TaskDefinition:
         """Parse natural language text into a TaskDefinition.
 
         Args:
             text: Natural language task description
+            timeout: Timeout in seconds (default: 30)
 
         Returns:
             TaskDefinition parsed from text
@@ -53,42 +60,63 @@ class AITaskParser:
         prompt = self._build_prompt(text)
 
         try:
-            # Call Claude API
-            message = self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=2000,
-                temperature=0.0,  # Deterministic for parsing
-                messages=[{"role": "user", "content": prompt}],
+            # Execute Claude CLI
+            cmd = [self.command, "-p", prompt]
+
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=str(self.working_dir),
+                text=True,
             )
 
-            # Extract response
-            response_text = message.content[0].text
+            # Wait with timeout
+            try:
+                stdout, stderr = process.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                stdout, stderr = process.communicate()
+                raise AITaskParserError(
+                    f"Claude CLI timed out after {timeout}s"
+                )
+
+            # Check exit code
+            if process.returncode != 0:
+                error_msg = f"Claude CLI failed with exit code {process.returncode}"
+                if stderr:
+                    error_msg += f": {stderr[:500]}"
+                raise AITaskParserError(error_msg)
 
             # Parse JSON from response
-            task_data = self._extract_json(response_text)
+            task_data = self._extract_json(stdout)
 
             # Convert to TaskDefinition
             return self._build_task_definition(task_data)
 
+        except FileNotFoundError as e:
+            raise AITaskParserError(
+                f"Claude CLI not found. Is it installed? Command: {self.command}"
+            ) from e
+        except AITaskParserError:
+            raise
         except Exception as e:
             raise AITaskParserError(
                 f"Failed to parse task with AI: {str(e)}"
             ) from e
 
     def _build_prompt(self, text: str) -> str:
-        """Build prompt for Claude to parse task.
+        """Build prompt for Claude CLI to parse task.
 
         Args:
             text: User's natural language task description
 
         Returns:
-            Formatted prompt for Claude
+            Formatted prompt for Claude CLI
         """
-        return f"""You are a task parser for the FSD (Full-Stack Development) system. Your job is to parse natural language task descriptions into structured JSON.
+        return f"""You are a task parser for the FSD (Full-Stack Development) system. Parse this natural language task description into structured JSON.
 
-Given this task description from a user:
-
-"{text}"
+Task description: "{text}"
 
 Parse it into a structured task with these fields:
 

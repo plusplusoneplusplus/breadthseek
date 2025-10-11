@@ -27,7 +27,7 @@ console = Console()
 @click.option("--interactive", "-i", is_flag=True, help="Create task interactively")
 @click.option("--dry-run", "-n", is_flag=True, help="Validate task without submitting")
 @click.option("--text", "-t", "task_text", type=str, help="Create task from natural language text")
-@click.option("--ai", is_flag=True, help="Use AI (Claude) to parse natural language (requires ANTHROPIC_API_KEY)")
+@click.option("--ai", is_flag=True, help="Use AI (Claude CLI) to parse natural language")
 def submit_command(task_file: Optional[Path], interactive: bool, dry_run: bool, task_text: Optional[str], ai: bool) -> None:
     """Submit a task for execution.
 
@@ -276,7 +276,7 @@ def _create_task_from_text_ai(text: str) -> TaskDefinition:
 
     except AITaskParserError as e:
         console.print(f"[red]AI parsing failed:[/red] {e}")
-        console.print("[yellow]Tip:[/yellow] Make sure ANTHROPIC_API_KEY is set in your environment")
+        console.print("[yellow]Tip:[/yellow] Make sure 'claude' CLI is installed and authenticated")
         raise click.ClickException(f"AI task parsing failed: {e}")
 
 
