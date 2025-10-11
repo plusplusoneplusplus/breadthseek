@@ -105,7 +105,7 @@ After completing the step, provide a brief summary in this format:
 - [Validation criterion 2]: ✅ PASS
 
 ### Next Steps
-[What should happen next, or "Ready for step {step_number + 1}"]
+[What should happen next, or "Ready for step {next_step_number}"]
 ```
 
 ## Example Execution
@@ -153,12 +153,12 @@ def test_require_auth_no_token():
 
 def test_require_auth_valid_token():
     token = generate_test_token(user_id=1)
-    response = client.get('/protected', headers={{'Authorization': f'Bearer {{token}}'}})
+    response = client.get('/protected', headers={{'Authorization': 'Bearer ' + token}})
     assert response.status_code == 200
 
 def test_require_auth_expired_token():
     token = generate_expired_token()
-    response = client.get('/protected', headers={{'Authorization': f'Bearer {{token}}'}})
+    response = client.get('/protected', headers={{'Authorization': 'Bearer ' + token}})
     assert response.status_code == 401
     assert 'expired' in response.json['error']
 ```

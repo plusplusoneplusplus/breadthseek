@@ -292,6 +292,7 @@ class PhaseExecutor:
                 description=task.description,
                 step_number=step["step_number"],
                 total_steps=len(plan["steps"]),
+                next_step_number=step["step_number"] + 1,
                 step_description=step["description"],
                 step_duration=step.get("estimated_duration", "30m"),
                 step_files=", ".join(step.get("files_to_modify", [])),
