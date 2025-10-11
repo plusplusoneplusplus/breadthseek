@@ -4,8 +4,11 @@ This module provides the main orchestration logic for executing tasks
 through planning, execution, and validation phases using Claude Code CLI.
 """
 
+import json
+import logging
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -18,6 +21,8 @@ from ..core.task_schema import TaskDefinition, load_task_from_yaml
 from ..core.task_state import TaskState
 from .plan_storage import PlanStorage
 from .retry_strategy import RetryConfig, RetryDecision, RetryStrategy
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -43,6 +48,7 @@ class PhaseExecutor:
         claude_executor: ClaudeExecutor,
         plan_storage: Optional[PlanStorage] = None,
         retry_strategy: Optional[RetryStrategy] = None,
+        log_file: Optional[Path] = None,
     ):
         """Initialize phase executor.
 
@@ -52,12 +58,40 @@ class PhaseExecutor:
             claude_executor: Claude CLI executor
             plan_storage: Plan storage (creates default if None)
             retry_strategy: Retry strategy (creates default if None)
+            log_file: Optional path to task log file for detailed logging
         """
         self.state_machine = state_machine
         self.checkpoint_manager = checkpoint_manager
         self.claude_executor = claude_executor
         self.plan_storage = plan_storage or PlanStorage()
         self.retry_strategy = retry_strategy or RetryStrategy(RetryConfig())
+        self.log_file = log_file
+    
+    def _log_to_file(self, level: str, message: str, task_id: str, **extra):
+        """Log a message to the task log file.
+        
+        Args:
+            level: Log level (DEBUG, INFO, WARN, ERROR)
+            message: Log message
+            task_id: Task ID
+            **extra: Additional fields to include in log entry
+        """
+        if not self.log_file:
+            return
+        
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "level": level,
+            "message": message,
+            "task_id": task_id,
+            **extra
+        }
+        
+        try:
+            with open(self.log_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(log_entry) + "\n")
+        except Exception as e:
+            logger.error(f"Failed to write to log file {self.log_file}: {e}")
 
     def execute_task(self, task_id: str, task_file: Optional[Path] = None) -> TaskExecutionResult:
         """Execute a task through all phases.
@@ -190,6 +224,9 @@ class PhaseExecutor:
             focus_files=task.focus_files or [],
             success_criteria=task.success_criteria or "",
         )
+        
+        # Log planning start
+        self._log_to_file("INFO", "Starting planning phase", task.id)
 
         # Execute Claude with planning prompt
         result = self.claude_executor.execute(
@@ -197,6 +234,23 @@ class PhaseExecutor:
             timeout=300,  # 5 minutes for planning
             task_id=task.id,
         )
+        
+        # Log Claude output
+        if result.stdout:
+            self._log_to_file(
+                "DEBUG",
+                "Claude planning output",
+                task.id,
+                stdout=result.stdout[:5000]
+            )
+        
+        if result.stderr:
+            self._log_to_file(
+                "WARN",
+                "Claude planning stderr",
+                task.id,
+                stderr=result.stderr[:2000]
+            )
 
         if not result.success:
             raise ClaudeExecutionError(
@@ -206,6 +260,14 @@ class PhaseExecutor:
         # Parse and save plan
         plan = result.parse_json()
         self.plan_storage.save_plan_dict(task.id, plan)
+        
+        # Log planning completion
+        self._log_to_file(
+            "INFO",
+            f"Planning phase completed: {len(plan.get('steps', []))} steps generated",
+            task.id,
+            step_count=len(plan.get('steps', []))
+        )
 
     def _execute_execution_phase(self, task: TaskDefinition) -> None:
         """Execute execution phase.
@@ -238,11 +300,49 @@ class PhaseExecutor:
                 plan_summary=plan.get("analysis", ""),
             )
 
+            # Log step start
+            self._log_to_file(
+                "INFO",
+                f"Executing step {step['step_number']}/{len(plan['steps'])}: {step['description']}",
+                task.id,
+                step_number=step['step_number'],
+                total_steps=len(plan['steps'])
+            )
+            
             # Execute step
             result = self.claude_executor.execute(
                 prompt=prompt,
                 timeout=1800,  # 30 minutes per step
                 task_id=task.id,
+            )
+            
+            # Log Claude output
+            if result.stdout:
+                self._log_to_file(
+                    "DEBUG",
+                    f"Claude stdout for step {step['step_number']}",
+                    task.id,
+                    step_number=step['step_number'],
+                    stdout=result.stdout[:5000]  # Limit to first 5000 chars
+                )
+            
+            if result.stderr:
+                self._log_to_file(
+                    "WARN",
+                    f"Claude stderr for step {step['step_number']}",
+                    task.id,
+                    step_number=step['step_number'],
+                    stderr=result.stderr[:2000]  # Limit to first 2000 chars
+                )
+            
+            # Log step completion
+            self._log_to_file(
+                "INFO",
+                f"Step {step['step_number']} completed in {result.duration_seconds:.1f}s",
+                task.id,
+                step_number=step['step_number'],
+                duration_seconds=result.duration_seconds,
+                exit_code=result.exit_code
             )
 
             if not result.success:

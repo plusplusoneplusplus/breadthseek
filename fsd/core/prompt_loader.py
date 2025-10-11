@@ -76,7 +76,12 @@ class PromptTemplate(BaseModel):
 
         # Perform variable substitution
         try:
-            # Replace all {variable_name} patterns
+            # Handle brace escaping: {{ becomes { and }} becomes } (Mustache-style)
+            # First, replace {{ and }} with placeholders so they're not treated as variables
+            rendered = rendered.replace('{{', '__ESCAPED_OPEN_BRACE__')
+            rendered = rendered.replace('}}', '__ESCAPED_CLOSE_BRACE__')
+
+            # Now replace all {variable_name} patterns
             def replace_var(match):
                 var_name = match.group(1)
                 if var_name in all_vars:
@@ -88,8 +93,14 @@ class PromptTemplate(BaseModel):
 
             rendered = re.sub(r"\{([^}]+)\}", replace_var, rendered)
 
+            # Convert escaped braces to literal braces
+            rendered = rendered.replace('__ESCAPED_OPEN_BRACE__', '{')
+            rendered = rendered.replace('__ESCAPED_CLOSE_BRACE__', '}')
+
             # Check for any remaining unsubstituted variables
-            remaining = re.findall(r"\{([^}]+)\}", rendered)
+            # Look for {simple_variable_name} patterns (not multi-line JSON)
+            # Variable names should be simple identifiers or snake_case
+            remaining = re.findall(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", rendered)
             if remaining:
                 raise PromptRenderError(
                     f"Template '{self.name}' has unsubstituted variables: {remaining}"

@@ -886,7 +886,8 @@ def auto_execution_loop():
                     phase_executor = PhaseExecutor(
                         state_machine=state_machine,
                         checkpoint_manager=checkpoint_manager,
-                        claude_executor=claude_executor
+                        claude_executor=claude_executor,
+                        log_file=task_log_file
                     )
                     
                     # Log start

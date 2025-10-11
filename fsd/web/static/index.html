@@ -80,16 +80,6 @@
                             <div class="loading">Loading...</div>
                         </div>
                     </div>
-
-                    <div class="card">
-                        <h2>Quick Actions</h2>
-                        <div style="display: flex; flex-direction: column; gap: 12px;">
-                            <button class="refresh-btn" onclick="openExecutionModal()">▶️ Start Execution</button>
-                            <button class="refresh-btn" style="background: #ef4444;" onclick="stopExecution()">⏹️ Stop Execution</button>
-                            <button class="refresh-btn" onclick="refreshData()">🔄 Refresh Data</button>
-                            <button class="refresh-btn" style="background: #10b981;" onclick="window.location.href='/docs'">📖 API Documentation</button>
-                        </div>
-                    </div>
                 </div>
 
                 <div class="completed-tasks-section" style="margin-top: 32px;">
@@ -170,13 +160,14 @@
         // Load modal templates dynamically
         async function loadModals() {
             try {
-                const [taskDetailHTML, taskCreationHTML] = await Promise.all([
+                const [taskDetailHTML, taskCreationHTML, executionModalHTML] = await Promise.all([
                     fetch('/static/templates/task-detail-modal.html').then(r => r.text()),
-                    fetch('/static/templates/task-creation-modal.html').then(r => r.text())
+                    fetch('/static/templates/task-creation-modal.html').then(r => r.text()),
+                    fetch('/static/templates/execution-modal.html').then(r => r.text())
                 ]);
 
                 const container = document.getElementById('modals-container');
-                container.innerHTML = taskDetailHTML + taskCreationHTML;
+                container.innerHTML = taskDetailHTML + taskCreationHTML + executionModalHTML;
             } catch (error) {
                 console.error('Failed to load modal templates:', error);
             }
