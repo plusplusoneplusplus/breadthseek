@@ -1,5 +1,6 @@
 """FSD init command."""
 
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -17,7 +18,12 @@ console = Console()
     is_flag=True,
     help="Force initialization even if .fsd directory already exists",
 )
-def init_command(force: bool) -> None:
+@click.option(
+    "--clean",
+    is_flag=True,
+    help="Delete all existing .fsd data before initializing (requires confirmation)",
+)
+def init_command(force: bool, clean: bool) -> None:
     """Initialize FSD in the current project.
 
     Creates a .fsd directory with default configuration and sets up
@@ -26,15 +32,36 @@ def init_command(force: bool) -> None:
     Examples:
         fsd init                # Initialize with default settings
         fsd init --force        # Reinitialize existing project
+        fsd init --clean        # Delete all data and reinitialize
     """
     project_root = Path.cwd()
     fsd_dir = project_root / ".fsd"
 
+    # Handle cleanup if requested
+    if clean and fsd_dir.exists():
+        console.print(
+            "[bold red]Warning:[/bold red] This will delete ALL data in .fsd directory:\n"
+            "  • Task history and state\n"
+            "  • Logs and reports\n"
+            "  • Checkpoints and plans\n"
+            "  • Queue and status data\n"
+        )
+        if not click.confirm("Are you sure you want to continue?", default=False):
+            console.print("[yellow]Cleanup cancelled[/yellow]")
+            return
+
+        try:
+            shutil.rmtree(fsd_dir)
+            console.print(f"[green]✓[/green] Cleaned up {fsd_dir}")
+        except Exception as e:
+            console.print(f"[red]Failed to clean up:[/red] {e}")
+            raise click.ClickException(f"Cleanup failed: {e}")
+
     # Check if already initialized
-    if fsd_dir.exists() and not force:
+    if fsd_dir.exists() and not force and not clean:
         console.print(
             f"[yellow]FSD already initialized in {project_root}[/yellow]\n"
-            "Use --force to reinitialize"
+            "Use --force to reinitialize or --clean to delete all data"
         )
         return
 

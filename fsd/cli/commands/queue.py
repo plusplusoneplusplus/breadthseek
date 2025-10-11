@@ -11,6 +11,12 @@ from rich.table import Table
 from rich.panel import Panel
 
 from fsd.core.task_schema import TaskDefinition, load_task_from_yaml
+from fsd.core.state_machine import TaskStateMachine
+from fsd.core.state_persistence import StatePersistence
+from fsd.core.checkpoint_manager import CheckpointManager
+from fsd.core.claude_executor import ClaudeExecutor
+from fsd.orchestrator.phase_executor import PhaseExecutor
+from fsd.tracking.activity_logger import ActivityLogger
 
 console = Console()
 
@@ -265,25 +271,98 @@ def _get_task_status(task_id: str) -> str:
 
 
 def _execute_task(task: TaskDefinition, mode: str) -> None:
-    """Execute a single task (placeholder implementation)."""
-    # For now, this is a placeholder that simulates task execution
+    """Execute a single task using the orchestrator."""
     console.print(f"[dim]Mode:[/dim] {mode}")
     console.print(f"[dim]Priority:[/dim] {task.priority.value}")
     console.print(f"[dim]Duration:[/dim] {task.estimated_duration}")
+    console.print()
 
-    # Create status directory
+    # Set up directories
     fsd_dir = Path.cwd() / ".fsd"
+    state_dir = fsd_dir / "state"
     status_dir = fsd_dir / "status"
+    logs_dir = fsd_dir / "logs"
+    checkpoints_dir = fsd_dir / "checkpoints"
+
+    state_dir.mkdir(exist_ok=True)
     status_dir.mkdir(exist_ok=True)
+    logs_dir.mkdir(exist_ok=True)
+    checkpoints_dir.mkdir(exist_ok=True)
 
-    # Update task status to running
-    _update_task_status(task.id, "running")
+    # Initialize components
+    persistence = StatePersistence(state_dir)
+    state_machine = TaskStateMachine(persistence_handler=persistence)
+    checkpoint_manager = CheckpointManager()
+    claude_executor = ClaudeExecutor()
 
-    console.print("[yellow]Task execution not yet implemented[/yellow]")
-    console.print("This will be implemented in the next phase")
+    # Generate session ID for this execution
+    from datetime import datetime
+    session_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
-    # For now, mark as completed
-    _update_task_status(task.id, "completed")
+    # Set up activity logger
+    activity_logger = ActivityLogger(session_id=session_id, logs_dir=logs_dir)
+
+    # Set up log file for this task
+    log_file = logs_dir / f"{task.id}.jsonl"
+
+    # Create phase executor
+    executor = PhaseExecutor(
+        state_machine=state_machine,
+        checkpoint_manager=checkpoint_manager,
+        claude_executor=claude_executor,
+        log_file=log_file,
+    )
+
+    try:
+        # Log task start
+        activity_logger.log_task_start(task.id, task.description)
+
+        console.print(f"[blue]Starting execution of task:[/blue] {task.id}")
+        console.print(f"[dim]Logs:[/dim] {log_file}")
+        console.print()
+
+        # Execute task through all phases
+        result = executor.execute_task(task.id)
+
+        if result.completed:
+            console.print(f"\n[green]✓ Task completed successfully[/green]")
+            if result.retry_count > 0:
+                console.print(f"[dim](completed after {result.retry_count} retries)[/dim]")
+            console.print(f"[dim]Duration:[/dim] {result.duration_seconds:.1f}s")
+
+            # Log task completion
+            activity_logger.log_task_complete(
+                task.id,
+                duration_ms=int(result.duration_seconds * 1000)
+            )
+
+            # Update status to completed
+            _update_task_status(task.id, "completed")
+        else:
+            console.print(f"\n[red]✗ Task failed[/red]")
+            console.print(f"[dim]Error:[/dim] {result.error_message}")
+            console.print(f"[dim]Duration:[/dim] {result.duration_seconds:.1f}s")
+
+            # Log task failure
+            activity_logger.log_task_fail(
+                task.id,
+                error=result.error_message or "Unknown error",
+                duration_ms=int(result.duration_seconds * 1000)
+            )
+
+            # Update status to failed
+            _update_task_status(task.id, "failed")
+
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Task execution interrupted by user[/yellow]")
+        _update_task_status(task.id, "failed")
+        activity_logger.log_task_fail(task.id, error="Interrupted by user", duration_ms=0)
+        raise
+    except Exception as e:
+        console.print(f"\n[red]Task execution failed with exception:[/red] {e}")
+        _update_task_status(task.id, "failed")
+        activity_logger.log_task_fail(task.id, error=str(e), duration_ms=0)
+        raise
 
 
 @queue_group.command("retry")
