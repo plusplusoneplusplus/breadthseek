@@ -124,8 +124,10 @@ async function loadSystemStatus() {
 
         // Check if data has changed
         if (deepEqual(status, cachedData.status)) {
+            console.log('[Cache] Status unchanged, skipping DOM update');
             return; // No changes, skip DOM update
         }
+        console.log('[Cache] Status changed, updating DOM');
         cachedData.status = status;
 
         // Check if FSD is initialized
@@ -212,8 +214,10 @@ async function loadTasks() {
 
         // Check if data has changed
         if (deepEqual(tasks, cachedData.tasks)) {
+            console.log('[Cache] Tasks unchanged, skipping DOM update');
             return; // No changes, skip DOM update
         }
+        console.log('[Cache] Tasks changed, updating DOM');
         cachedData.tasks = tasks;
         allTasks = tasks;
 
