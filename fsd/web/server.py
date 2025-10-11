@@ -1384,13 +1384,83 @@ async def get_system_logs(
         )
 
 
+@app.get("/api/logs/task-creation")
+async def get_task_creation_logs(
+    lines: int = 50,
+    level: Optional[str] = None
+) -> Dict[str, Any]:
+    """Get AI task creation logs (Claude CLI interactions).
+
+    Args:
+        lines: Number of log entries to return (default: 50)
+        level: Filter by level (REQUEST, RESPONSE, SUCCESS, ERROR)
+    """
+    if not is_fsd_initialized():
+        raise HTTPException(status_code=400, detail="FSD not initialized")
+
+    valid_levels = ["REQUEST", "RESPONSE", "SUCCESS", "ERROR"]
+    if level and level not in valid_levels:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid level. Must be one of: {', '.join(valid_levels)}"
+        )
+
+    try:
+        fsd_dir = get_fsd_dir()
+        logs_dir = fsd_dir / "logs"
+        log_file = logs_dir / "task-creation.log"
+
+        if not log_file.exists():
+            return {
+                "logs": [],
+                "message": "No task creation logs found yet"
+            }
+
+        # Read and parse log file
+        log_entries = []
+
+        with open(log_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+
+                try:
+                    entry = json.loads(line)
+
+                    # Filter by level if specified
+                    if level and entry.get("level") != level:
+                        continue
+
+                    log_entries.append(entry)
+
+                except json.JSONDecodeError:
+                    # Skip invalid JSON lines
+                    continue
+
+        # Return last N entries
+        recent_entries = log_entries[-lines:] if lines else log_entries
+
+        return {
+            "logs": recent_entries,
+            "total_count": len(log_entries),
+            "returned_count": len(recent_entries)
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to read task creation logs: {str(e)}"
+        )
+
+
 @app.get("/api/logs/{task_id}/stream")
 async def stream_task_logs(
     task_id: str,
     level: Optional[str] = None
 ):
     """Stream logs for a specific task in real-time using Server-Sent Events.
-    
+
     Args:
         task_id: Task ID to stream logs for
         level: Filter by log level (DEBUG, INFO, WARN, ERROR)
@@ -1657,7 +1727,13 @@ def _create_task_from_text(text: str) -> TaskDefinition:
     Raises:
         AITaskParserError: If AI parsing fails
     """
-    parser = AITaskParser()
+    # Set up logging for AI task parsing
+    fsd_dir = get_fsd_dir()
+    logs_dir = fsd_dir / "logs"
+    logs_dir.mkdir(exist_ok=True)
+    log_file = logs_dir / "task-creation.log"
+
+    parser = AITaskParser(log_file=log_file)
     return parser.parse_task(text)
 
 

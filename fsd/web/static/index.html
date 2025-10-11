@@ -126,7 +126,13 @@
             <div id="tab-logs" class="main-tab-content">
                 <div class="logs-section">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                        <h2 style="margin: 0;">System Logs</h2>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <h2 style="margin: 0;">Logs</h2>
+                            <select id="log-type-selector" onchange="switchLogType()" style="padding: 8px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 14px;">
+                                <option value="system">System Logs</option>
+                                <option value="task-creation">Task Creation (AI)</option>
+                            </select>
+                        </div>
                         <div style="display: flex; gap: 8px; align-items: center;">
                             <select id="log-level-filter" onchange="filterLogs()" style="padding: 8px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 14px;">
                                 <option value="">All Levels</option>
@@ -135,7 +141,7 @@
                                 <option value="WARN">WARN</option>
                                 <option value="ERROR">ERROR</option>
                             </select>
-                            <button class="refresh-btn" onclick="loadSystemLogs()" style="padding: 8px 16px;">
+                            <button class="refresh-btn" onclick="refreshCurrentLogs()" style="padding: 8px 16px;">
                                 🔄 Refresh Logs
                             </button>
                         </div>

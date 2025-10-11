@@ -10,6 +10,7 @@ This ensures we use the same authentication method as the rest of the system.
 import json
 import re
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -26,15 +27,22 @@ class AITaskParserError(ExecutionError):
 class AITaskParser:
     """Parse natural language task descriptions using Claude CLI."""
 
-    def __init__(self, command: str = "claude", working_dir: Optional[Path] = None):
+    def __init__(
+        self,
+        command: str = "claude",
+        working_dir: Optional[Path] = None,
+        log_file: Optional[Path] = None,
+    ):
         """Initialize AI task parser.
 
         Args:
             command: Claude CLI command (default: "claude")
             working_dir: Working directory for command execution
+            log_file: Optional log file to record CLI interactions
         """
         self.command = command
         self.working_dir = Path(working_dir) if working_dir else Path.cwd()
+        self.log_file = Path(log_file) if log_file else None
 
     def parse_task(self, text: str, timeout: int = 30) -> TaskDefinition:
         """Parse natural language text into a TaskDefinition.
@@ -58,6 +66,15 @@ class AITaskParser:
             "30m"
         """
         prompt = self._build_prompt(text)
+        start_time = datetime.now()
+
+        # Log the request
+        self._log_interaction("REQUEST", {
+            "timestamp": start_time.isoformat(),
+            "input_text": text,
+            "prompt": prompt,
+            "command": self.command,
+        })
 
         try:
             # Execute Claude CLI
@@ -77,9 +94,28 @@ class AITaskParser:
             except subprocess.TimeoutExpired:
                 process.kill()
                 stdout, stderr = process.communicate()
+
+                # Log timeout
+                self._log_interaction("ERROR", {
+                    "timestamp": datetime.now().isoformat(),
+                    "error": "timeout",
+                    "duration_seconds": timeout,
+                })
+
                 raise AITaskParserError(
                     f"Claude CLI timed out after {timeout}s"
                 )
+
+            duration = (datetime.now() - start_time).total_seconds()
+
+            # Log the response
+            self._log_interaction("RESPONSE", {
+                "timestamp": datetime.now().isoformat(),
+                "exit_code": process.returncode,
+                "stdout": stdout,
+                "stderr": stderr,
+                "duration_seconds": duration,
+            })
 
             # Check exit code
             if process.returncode != 0:
@@ -91,19 +127,64 @@ class AITaskParser:
             # Parse JSON from response
             task_data = self._extract_json(stdout)
 
+            # Log successful parsing
+            self._log_interaction("SUCCESS", {
+                "timestamp": datetime.now().isoformat(),
+                "task_id": task_data.get("id"),
+                "parsed_data": task_data,
+            })
+
             # Convert to TaskDefinition
             return self._build_task_definition(task_data)
 
         except FileNotFoundError as e:
+            self._log_interaction("ERROR", {
+                "timestamp": datetime.now().isoformat(),
+                "error": "command_not_found",
+                "message": str(e),
+            })
             raise AITaskParserError(
                 f"Claude CLI not found. Is it installed? Command: {self.command}"
             ) from e
         except AITaskParserError:
+            # Already logged
             raise
         except Exception as e:
+            self._log_interaction("ERROR", {
+                "timestamp": datetime.now().isoformat(),
+                "error": "unexpected_error",
+                "message": str(e),
+            })
             raise AITaskParserError(
                 f"Failed to parse task with AI: {str(e)}"
             ) from e
+
+    def _log_interaction(self, level: str, data: dict) -> None:
+        """Log CLI interaction to file.
+
+        Args:
+            level: Log level (REQUEST, RESPONSE, SUCCESS, ERROR)
+            data: Data to log
+        """
+        if not self.log_file:
+            return
+
+        try:
+            # Ensure log directory exists
+            self.log_file.parent.mkdir(parents=True, exist_ok=True)
+
+            # Append log entry
+            log_entry = {
+                "level": level,
+                **data,
+            }
+
+            with open(self.log_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(log_entry) + "\n")
+
+        except Exception as e:
+            # Don't fail task creation if logging fails
+            print(f"Warning: Failed to log AI task parser interaction: {e}")
 
     def _build_prompt(self, text: str) -> str:
         """Build prompt for Claude CLI to parse task.

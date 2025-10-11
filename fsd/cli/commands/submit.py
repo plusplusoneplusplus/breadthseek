@@ -269,7 +269,17 @@ def _create_task_from_text_ai(text: str) -> TaskDefinition:
     console.print("[dim]Using AI to parse task...[/dim]")
 
     try:
-        parser = AITaskParser()
+        # Set up logging for AI task parsing
+        fsd_dir = Path.cwd() / ".fsd"
+        if fsd_dir.exists():
+            logs_dir = fsd_dir / "logs"
+            logs_dir.mkdir(exist_ok=True)
+            log_file = logs_dir / "task-creation.log"
+            parser = AITaskParser(log_file=log_file)
+            console.print(f"[dim]Logging to: {log_file}[/dim]")
+        else:
+            parser = AITaskParser()
+
         task = parser.parse_task(text)
         console.print("[green]✓[/green] AI parsing successful")
         return task

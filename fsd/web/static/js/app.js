@@ -998,6 +998,7 @@ async function stopExecution() {
 // Log Viewing
 let currentLogTaskId = null;
 let logStreamEventSource = null;
+let currentLogType = 'system'; // 'system' or 'task-creation'
 
 async function loadSystemLogs() {
     if (!isInitialized) return;
@@ -1023,22 +1024,134 @@ async function loadSystemLogs() {
             container.innerHTML = '<div style="color: #9ca3af;">No logs available</div>';
             return;
         }
-        
+
         // Render logs
         const logsHtml = data.logs.map(entry => formatLogEntry(entry)).join('');
         container.innerHTML = logsHtml;
-        
+
         // Auto-scroll to bottom
         container.scrollTop = container.scrollHeight;
-        
+
     } catch (error) {
         console.error('Failed to load system logs:', error);
         document.getElementById('logs-container').innerHTML = `<div style="color: #ef4444;">Failed to load logs: ${error.message}</div>`;
     }
 }
 
+async function loadTaskCreationLogs() {
+    if (!isInitialized) return;
+
+    try {
+        const levelFilter = document.getElementById('log-level-filter').value;
+        const params = new URLSearchParams({ lines: 50 });
+        if (levelFilter) {
+            params.append('level', levelFilter);
+        }
+
+        const data = await fetchData(`/logs/task-creation?${params}`);
+
+        const container = document.getElementById('logs-container');
+
+        if (!data.logs || data.logs.length === 0) {
+            container.innerHTML = '<div style="color: #9ca3af;">No task creation logs yet. Create a task using natural language to see AI parsing logs here.</div>';
+            return;
+        }
+
+        // Render logs
+        const logsHtml = data.logs.map(entry => formatTaskCreationLogEntry(entry)).join('');
+        container.innerHTML = logsHtml;
+
+        // Auto-scroll to bottom
+        container.scrollTop = container.scrollHeight;
+
+    } catch (error) {
+        console.error('Failed to load task creation logs:', error);
+        document.getElementById('logs-container').innerHTML = `<div style="color: #ef4444;">Failed to load task creation logs: ${error.message}</div>`;
+    }
+}
+
+function formatTaskCreationLogEntry(entry) {
+    const timestamp = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : '';
+    const level = entry.level || 'INFO';
+
+    // Color code by level
+    const levelColors = {
+        'REQUEST': '#3b82f6',
+        'RESPONSE': '#10b981',
+        'SUCCESS': '#22c55e',
+        'ERROR': '#ef4444'
+    };
+
+    const levelColor = levelColors[level] || '#d4d4d4';
+    let html = `<div style="margin-bottom: 12px; border-left: 3px solid ${levelColor}; padding-left: 12px;">`;
+    html += `<div style="color: ${levelColor}; font-weight: bold;">[${timestamp}] ${level}</div>`;
+
+    if (level === 'REQUEST') {
+        html += `<div style="color: #9ca3af; margin-top: 4px;">Input: ${escapeHtml(entry.input_text || '')}</div>`;
+        if (entry.prompt) {
+            html += `<details style="margin-top: 8px;"><summary style="cursor: pointer; color: #6b7280;">View Full Prompt</summary>`;
+            html += `<pre style="margin-top: 8px; padding: 8px; background: #374151; border-radius: 4px; overflow-x: auto; font-size: 12px;">${escapeHtml(entry.prompt)}</pre></details>`;
+        }
+    } else if (level === 'RESPONSE') {
+        html += `<div style="color: #9ca3af; margin-top: 4px;">Exit Code: ${entry.exit_code}, Duration: ${entry.duration_seconds?.toFixed(2)}s</div>`;
+        if (entry.stdout) {
+            html += `<details style="margin-top: 8px;"><summary style="cursor: pointer; color: #6b7280;">View Claude Response</summary>`;
+            html += `<pre style="margin-top: 8px; padding: 8px; background: #374151; border-radius: 4px; overflow-x: auto; font-size: 12px;">${escapeHtml(entry.stdout)}</pre></details>`;
+        }
+        if (entry.stderr) {
+            html += `<div style="color: #ef4444; margin-top: 4px;">Stderr: ${escapeHtml(entry.stderr)}</div>`;
+        }
+    } else if (level === 'SUCCESS') {
+        html += `<div style="color: #10b981; margin-top: 4px;">Task ID: ${escapeHtml(entry.task_id || '')}</div>`;
+        if (entry.parsed_data) {
+            html += `<details style="margin-top: 8px;"><summary style="cursor: pointer; color: #6b7280;">View Parsed Data</summary>`;
+            html += `<pre style="margin-top: 8px; padding: 8px; background: #374151; border-radius: 4px; overflow-x: auto; font-size: 12px;">${JSON.stringify(entry.parsed_data, null, 2)}</pre></details>`;
+        }
+    } else if (level === 'ERROR') {
+        html += `<div style="color: #ef4444; margin-top: 4px;">Error: ${escapeHtml(entry.error || entry.message || 'Unknown error')}</div>`;
+    }
+
+    html += '</div>';
+    return html;
+}
+
+function switchLogType() {
+    const selector = document.getElementById('log-type-selector');
+    currentLogType = selector.value;
+
+    // Update level filter options based on log type
+    const levelFilter = document.getElementById('log-level-filter');
+    if (currentLogType === 'task-creation') {
+        levelFilter.innerHTML = `
+            <option value="">All Levels</option>
+            <option value="REQUEST">REQUEST</option>
+            <option value="RESPONSE">RESPONSE</option>
+            <option value="SUCCESS">SUCCESS</option>
+            <option value="ERROR">ERROR</option>
+        `;
+    } else {
+        levelFilter.innerHTML = `
+            <option value="">All Levels</option>
+            <option value="DEBUG">DEBUG</option>
+            <option value="INFO">INFO</option>
+            <option value="WARN">WARN</option>
+            <option value="ERROR">ERROR</option>
+        `;
+    }
+
+    refreshCurrentLogs();
+}
+
+function refreshCurrentLogs() {
+    if (currentLogType === 'task-creation') {
+        loadTaskCreationLogs();
+    } else {
+        loadSystemLogs();
+    }
+}
+
 function filterLogs() {
-    loadSystemLogs();
+    refreshCurrentLogs();
 }
 
 function openLogsModal(taskId) {
