@@ -35,6 +35,7 @@ from .task_state import (
     is_terminal_state,
     is_valid_transition,
 )
+from .task_validator import TaskValidator, validate_task_for_execution
 
 __all__ = [
     # Exceptions
@@ -55,6 +56,9 @@ __all__ = [
     "load_tasks_from_yaml",
     "save_task",
     "validate_task",
+    # Task validation
+    "TaskValidator",
+    "validate_task_for_execution",
     # State management
     "TaskState",
     "TaskStateInfo",

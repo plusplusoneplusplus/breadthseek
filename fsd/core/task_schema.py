@@ -104,6 +104,25 @@ class TaskDefinition(BaseModel):
             raise ValueError("PR title is required when create_pr is True")
         return self
 
+    @model_validator(mode="after")
+    def ensure_execution_requirements(self) -> "TaskDefinition":
+        """Ensure task has all fields needed for successful execution.
+
+        Auto-generates success_criteria if not provided to ensure the
+        validation phase can function properly.
+        """
+        # Auto-generate success_criteria if not provided
+        if not self.success_criteria:
+            # Generate basic success criteria based on task description
+            self.success_criteria = (
+                "- Implementation matches the task description\n"
+                "- All existing tests continue to pass\n"
+                "- Code quality checks pass (linting, type checking)\n"
+                "- No security issues or secrets in code"
+            )
+
+        return self
+
     def get_duration_seconds(self) -> int:
         """Get estimated duration in seconds."""
         duration = _parse_duration(self.estimated_duration)

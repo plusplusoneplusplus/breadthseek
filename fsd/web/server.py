@@ -21,6 +21,7 @@ from fsd.core.task_schema import TaskDefinition, load_task_from_yaml, Priority, 
 from fsd.core.state_machine import TaskStateMachine
 from fsd.core.state_persistence import StatePersistence
 from fsd.core.task_state import TaskState
+from fsd.core.task_validator import TaskValidator, TaskValidationError
 from fsd.orchestrator.phase_executor import PhaseExecutor
 from fsd.core.claude_executor import ClaudeExecutor
 from fsd.core.checkpoint_manager import CheckpointManager
@@ -532,6 +533,14 @@ async def create_task_from_natural_language(request: CreateTaskNaturalLanguage) 
 
     try:
         task = _create_task_from_text(request.text)
+
+        # Validate task can be executed
+        try:
+            validator = TaskValidator()
+            validator.validate_and_raise(task)
+        except TaskValidationError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
         _submit_task(task)
 
         return {
@@ -580,6 +589,13 @@ async def create_task_from_structured(request: CreateTaskStructured) -> Dict[str
             success_criteria=request.success_criteria,
             on_completion=on_completion,
         )
+
+        # Validate task can be executed
+        try:
+            validator = TaskValidator()
+            validator.validate_and_raise(task)
+        except TaskValidationError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
         _submit_task(task)
 
