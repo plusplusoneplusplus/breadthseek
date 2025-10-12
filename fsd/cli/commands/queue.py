@@ -21,13 +21,16 @@ from fsd.tracking.activity_logger import ActivityLogger
 console = Console()
 
 
-@click.group()
-def queue_group() -> None:
+@click.group(invoke_without_command=True)
+@click.pass_context
+def queue_group(ctx: click.Context) -> None:
     """Manage the task queue.
 
     Commands for listing, starting, stopping, and managing queued tasks.
     """
-    pass
+    # If no subcommand was provided, show help
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
 
 
 @queue_group.command("list")

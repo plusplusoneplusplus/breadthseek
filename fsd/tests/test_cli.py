@@ -95,6 +95,28 @@ class TestCLI:
                 assert "Task validation passed" in result.output
                 assert "Dry run mode" in result.output
 
+    def test_queue_help(self):
+        """Test queue command displays help when invoked without subcommand."""
+        result = self.runner.invoke(cli, ["queue"])
+
+        assert result.exit_code == 0
+        assert "Manage the task queue" in result.output
+        assert "list" in result.output
+        assert "start" in result.output
+        assert "clear" in result.output
+        assert "retry" in result.output
+
+    def test_queue_help_flag(self):
+        """Test queue command with --help flag."""
+        result = self.runner.invoke(cli, ["queue", "--help"])
+
+        assert result.exit_code == 0
+        assert "Manage the task queue" in result.output
+        assert "list" in result.output
+        assert "start" in result.output
+        assert "clear" in result.output
+        assert "retry" in result.output
+
     def test_queue_list_empty(self):
         """Test queue list with no tasks."""
         with tempfile.TemporaryDirectory() as temp_dir:
