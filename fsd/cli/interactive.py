@@ -43,7 +43,9 @@ def show_menu() -> None:
 
     console.print("\n[bold]Available commands:[/bold]")
     console.print(table)
-    console.print("\n[dim]Tip: Use 'command --help' for detailed help (e.g., 'queue --help')[/dim]")
+    console.print("\n[dim]Tips:[/dim]")
+    console.print("[dim]  • Use 'command --help' for detailed help (e.g., 'queue --help')[/dim]")
+    console.print("[dim]  • All interactive flows support option '0' to cancel/go back[/dim]")
     console.print()
 
 
