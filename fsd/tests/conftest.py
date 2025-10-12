@@ -19,6 +19,10 @@ from fsd.core import (
     StatePersistence,
     TaskStateMachine,
 )
+from tests.mocks import (
+    MockClaudeExecutor,
+    MockResponseLibrary,
+)
 
 
 # ============================================================================
@@ -429,6 +433,33 @@ def make_git_commit(git_repo: Path):
         return result.stdout.strip()
 
     return _make_commit
+
+
+# ============================================================================
+# Mock AI Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def mock_executor() -> Generator[MockClaudeExecutor, None, None]:
+    """Provide a fresh MockClaudeExecutor for each test.
+
+    Yields:
+        MockClaudeExecutor instance that is reset after each test
+    """
+    executor = MockClaudeExecutor()
+    yield executor
+    executor.reset()
+
+
+@pytest.fixture
+def mock_responses() -> type[MockResponseLibrary]:
+    """Provide the MockResponseLibrary for easy access.
+
+    Returns:
+        MockResponseLibrary class
+    """
+    return MockResponseLibrary
 
 
 # ============================================================================
