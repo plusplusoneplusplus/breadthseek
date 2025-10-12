@@ -27,19 +27,19 @@ def show_welcome() -> None:
 def show_menu() -> None:
     """Display main menu options."""
     table = Table(show_header=False, box=None, padding=(0, 2))
-    table.add_column("Option", style="cyan bold", width=8)
-    table.add_column("Command", style="green")
+    table.add_column("Command", style="cyan bold", width=12)
     table.add_column("Description", style="dim")
 
-    table.add_row("1", "init", "Initialize FSD in current project")
-    table.add_row("2", "submit", "Submit a new task")
-    table.add_row("3", "queue", "Manage task queue")
-    table.add_row("4", "status", "Check system status")
-    table.add_row("5", "logs", "View task logs")
-    table.add_row("6", "serve", "Start web interface")
-    table.add_row("q", "quit", "Exit interactive mode")
+    table.add_row("init", "Initialize FSD in current project")
+    table.add_row("submit", "Submit a new task")
+    table.add_row("queue", "Manage task queue")
+    table.add_row("status", "Check system status")
+    table.add_row("logs", "View task logs")
+    table.add_row("serve", "Start web interface")
+    table.add_row("?", "Show this help")
+    table.add_row("quit", "Exit interactive mode")
 
-    console.print("\n[bold]What would you like to do?[/bold]")
+    console.print("\n[bold]Available commands:[/bold]")
     console.print(table)
     console.print()
 
@@ -182,23 +182,35 @@ def run_interactive_mode(
         or None if user quits.
     """
     show_welcome()
+    show_menu()
 
     while True:
-        show_menu()
-        choice = click.prompt("Select option", type=str).lower().strip()
+        choice = click.prompt("Command", type=str).lower().strip()
 
-        if choice == "q" or choice == "quit":
+        # Handle quit
+        if choice in ("q", "quit", "exit"):
             console.print("[yellow]Goodbye![/yellow]")
             return None
 
-        # Map choices to handlers
+        # Handle help
+        if choice == "?":
+            show_menu()
+            continue
+
+        # Map command names and numbers to handlers
         handlers = {
             "1": handle_init,
+            "init": handle_init,
             "2": handle_submit,
+            "submit": handle_submit,
             "3": handle_queue,
+            "queue": handle_queue,
             "4": handle_status,
+            "status": handle_status,
             "5": handle_logs,
+            "logs": handle_logs,
             "6": handle_serve,
+            "serve": handle_serve,
         }
 
         handler = handlers.get(choice)
@@ -206,18 +218,17 @@ def run_interactive_mode(
             cmd_args = handler()
             if cmd_args:  # Only proceed if we have valid command args
                 if continuous:
-                    # Execute the command and loop back to menu
+                    # Execute the command and loop back to prompt
                     _execute_command(cmd_args, verbose, config)
                     console.print("\n[dim]Press Enter to continue...[/dim]")
                     input()
                 else:
                     # Return command args for external execution
                     return cmd_args
-            # If empty list returned (e.g., cancelled operation), show menu again
+            # If empty list returned (e.g., cancelled operation), show prompt again
         else:
-            console.print(f"[red]Invalid option: {choice}[/red]")
-            console.print("[dim]Press Enter to continue...[/dim]")
-            input()
+            console.print(f"[red]Unknown command: {choice}[/red]")
+            console.print("[dim]Type '?' for help[/dim]\n")
 
 
 def _execute_command(cmd_args: list[str], verbose: bool, config: Optional[Path]) -> None:

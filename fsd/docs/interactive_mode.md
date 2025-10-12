@@ -12,48 +12,73 @@ fsd
 
 This will launch an interactive menu that operates in a continuous loop:
 
-1. **Choosing a command** - Select from available commands (init, submit, queue, status, logs, serve)
-2. **Providing parameters** - The CLI will prompt for required parameters based on your selection
-3. **Executing the command** - The selected command runs with your provided parameters
-4. **Return to menu** - After command completion, press Enter to return to the menu for the next task
-5. **Repeat** - Continue executing commands until you're ready to quit
+1. **Type a command** - Simply type the command name (e.g., `status`, `submit`, `queue`)
+2. **Or use numbers** - You can also use numbers (1-6) for quick access
+3. **Get help** - Type `?` to see available commands anytime
+4. **Providing parameters** - The CLI will prompt for required parameters based on your command
+5. **Executing the command** - The selected command runs with your provided parameters
+6. **Return to prompt** - After command completion, press Enter to continue
+7. **Repeat** - Continue executing commands until you type `quit`
 
-The interactive mode runs continuously, allowing you to execute multiple commands in sequence without re-launching the CLI.
+The interactive mode runs continuously, allowing you to execute multiple commands in sequence without re-launching the CLI. Just type what you want!
 
 ## Features
 
-- **User-friendly menu** - Clear numbered options for all available commands
+- **Natural command input** - Type command names directly (e.g., `status`, `submit`)
+- **Number shortcuts** - Use numbers (1-6) for quick access
+- **Built-in help** - Type `?` to see all available commands
 - **Smart prompts** - Context-aware prompts with sensible defaults
-- **Validation** - Input validation to ensure correct parameters
-- **Graceful exit** - Type 'q' or 'quit' to exit at any time
+- **Input validation** - Ensures correct parameters before execution
+- **Multiple exit options** - Type `quit`, `q`, or `exit` to leave
 
 ## Example Session
 
 ```
-┌───────────────────────────────────────────────────────────────┐
-│ FSD - Autonomous Overnight Coding Agent System                │
-│ Interactive Mode                                              │
-└───────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│ FSD - Autonomous Overnight Coding Agent System                 │
+│ Interactive Mode                                               │
+└────────────────────────────────────────────────────────────────┘
 
-What would you like to do?
-  1    init     Initialize FSD in current project
-  2    submit   Submit a new task
-  3    queue    Manage task queue
-  4    status   Check system status
-  5    logs     View task logs
-  6    serve    Start web interface
-  q    quit     Exit interactive mode
+Available commands:
+  init          Initialize FSD in current project
+  submit        Submit a new task
+  queue         Manage task queue
+  status        Check system status
+  logs          View task logs
+  serve         Start web interface
+  ?             Show this help
+  quit          Exit interactive mode
 
-Select option: 2
+Command: status
+
+Executing: fsd status
+
+╭─────────────────────── FSD System Status ───────────────────────╮
+│ 🟢 Execution Status: Idle                                       │
+│ Task Queue: 0 queued, 0 running, 5 completed, 0 failed         │
+╰─────────────────────────────────────────────────────────────────╯
+
+Press Enter to continue...
+
+Command: ?
+
+Available commands:
+  init          Initialize FSD in current project
+  submit        Submit a new task
+  queue         Manage task queue
+  status        Check system status
+  logs          View task logs
+  serve         Start web interface
+  ?             Show this help
+  quit          Exit interactive mode
+
+Command: submit
 
 Submit Task
 Choose submission method:
   1 - Natural language text
   2 - YAML file
 Your choice [1]: 1
-
-Enter your task description. Can include priority and time estimate.
-Example: HIGH priority: Fix login bug. Takes 30m
 
 Task description: Add user authentication feature
 
@@ -63,7 +88,8 @@ Executing: fsd submit --text "Add user authentication feature"
 
 Press Enter to continue...
 
-[Returns to menu for next command]
+Command: quit
+Goodbye!
 ```
 
 ## Command-Specific Prompts
@@ -93,7 +119,9 @@ Press Enter to continue...
 
 ## Benefits
 
-- **No need to remember commands** - Browse available options
+- **Intuitive input** - Type command names naturally or use number shortcuts
+- **Discoverable** - Type `?` anytime to see available commands
+- **No memorization** - Browse available options as you work
 - **Faster onboarding** - New users can explore features easily
 - **Reduced errors** - Guided input with validation
 - **Flexible workflow** - Switch between interactive and direct command modes
