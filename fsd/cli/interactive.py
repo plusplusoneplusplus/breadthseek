@@ -27,14 +27,17 @@ def show_welcome() -> None:
 def show_menu() -> None:
     """Display main menu options."""
     table = Table(show_header=False, box=None, padding=(0, 2))
-    table.add_column("Command", style="cyan bold", width=12)
+    table.add_column("Command", style="cyan bold", width=20)
     table.add_column("Description", style="dim")
 
     table.add_row("init", "Initialize FSD in current project")
     table.add_row("submit", "Submit a new task")
-    table.add_row("queue", "Manage task queue")
+    table.add_row("queue [action]", "Manage task queue")
+    table.add_row("  queue list", "List tasks in queue")
+    table.add_row("  queue start", "Start queue execution")
+    table.add_row("  queue stop", "Stop queue execution")
     table.add_row("status", "Check system status")
-    table.add_row("logs", "View task logs")
+    table.add_row("logs [task-id]", "View task logs")
     table.add_row("serve", "Start web interface")
     table.add_row("?", "Show this help")
     table.add_row("quit", "Exit interactive mode")
@@ -165,6 +168,46 @@ def handle_serve() -> list[str]:
     return cmd_args
 
 
+def _try_direct_command(input_str: str) -> Optional[list[str]]:
+    """
+    Try to parse and execute a command directly with arguments.
+
+    Args:
+        input_str: The full command string with arguments.
+
+    Returns:
+        Command args list if command can be executed directly, None otherwise.
+    """
+    parts = input_str.split()
+    if not parts:
+        return None
+
+    cmd = parts[0]
+    args = parts[1:]
+
+    # Commands that can be executed directly with arguments
+    if cmd == "queue" and args:
+        # queue list, queue start, queue stop, queue clear
+        if args[0] in ("list", "start", "stop", "clear"):
+            return ["queue", args[0]]
+        # queue retry <task-id>
+        elif args[0] == "retry" and len(args) == 2:
+            return ["queue", "retry", args[1]]
+
+    elif cmd == "logs" and args:
+        # logs <task-id> or logs <task-id> --follow
+        cmd_args = ["logs", args[0]]
+        if "--follow" in args or "-f" in args:
+            cmd_args.append("--follow")
+        return cmd_args
+
+    elif cmd == "status" and not args:
+        # status without arguments
+        return ["status"]
+
+    return None
+
+
 def run_interactive_mode(
     continuous: bool = False, verbose: bool = False, config: Optional[Path] = None
 ) -> Optional[list[str]]:
@@ -185,7 +228,8 @@ def run_interactive_mode(
     show_menu()
 
     while True:
-        choice = click.prompt("Command", type=str).lower().strip()
+        user_input = click.prompt("Command", type=str).strip()
+        choice = user_input.lower()
 
         # Handle quit
         if choice in ("q", "quit", "exit"):
@@ -196,6 +240,19 @@ def run_interactive_mode(
         if choice == "?":
             show_menu()
             continue
+
+        # Try direct command execution with arguments first
+        direct_cmd = _try_direct_command(choice)
+        if direct_cmd:
+            if continuous:
+                _execute_command(direct_cmd, verbose, config)
+                console.print()  # Add blank line for visual separation
+            else:
+                return direct_cmd
+            continue
+
+        # Extract base command for handler lookup
+        base_cmd = choice.split()[0] if " " in choice else choice
 
         # Map command names and numbers to handlers
         handlers = {
@@ -213,7 +270,7 @@ def run_interactive_mode(
             "serve": handle_serve,
         }
 
-        handler = handlers.get(choice)
+        handler = handlers.get(base_cmd)
         if handler:
             cmd_args = handler()
             if cmd_args:  # Only proceed if we have valid command args
@@ -226,7 +283,7 @@ def run_interactive_mode(
                     return cmd_args
             # If empty list returned (e.g., cancelled operation), show prompt again
         else:
-            console.print(f"[red]Unknown command: {choice}[/red]")
+            console.print(f"[red]Unknown command: {user_input}[/red]")
             console.print("[dim]Type '?' for help[/dim]\n")
 
 
