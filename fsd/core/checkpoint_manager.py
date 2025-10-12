@@ -150,15 +150,19 @@ class CheckpointManager:
                 current_branch = self.git.get_current_branch()
                 files_changed = self.git.get_changed_files()
 
-                # Create git commit
-                commit_message = f"[FSD Checkpoint] {task_id}: {checkpoint_type.value}"
-                if description:
-                    commit_message += f"\n\n{description}"
+                # Check if there are any changes to commit
+                has_changes = self.git.has_uncommitted_changes()
 
-                commit_hash = self.git.create_commit(
-                    commit_message,
-                    allow_empty=True,  # Allow empty commits for checkpoint markers
-                )
+                # Create git commit only if there are changes
+                if has_changes:
+                    commit_message = f"[FSD Checkpoint] {task_id}: {checkpoint_type.value}"
+                    if description:
+                        commit_message += f"\n\n{description}"
+
+                    commit_hash = self.git.create_commit(commit_message, allow_empty=False)
+                else:
+                    # No changes - reference current commit without creating a new one
+                    commit_hash = self.git.get_current_commit()
 
                 # Create git tag if requested
                 tag_name = None
@@ -172,6 +176,10 @@ class CheckpointManager:
                     duration_since_start = (
                         datetime.utcnow() - self._task_start_times[task_id]
                     ).total_seconds()
+
+                # Add information about whether a new commit was created
+                checkpoint_meta = metadata or {}
+                checkpoint_meta["new_commit_created"] = has_changes
 
                 # Create checkpoint metadata
                 checkpoint_metadata = CheckpointMetadata(
@@ -188,7 +196,7 @@ class CheckpointManager:
                     error_info=error_info,
                     description=description,
                     duration_since_start=duration_since_start,
-                    metadata=metadata or {},
+                    metadata=checkpoint_meta,
                 )
 
                 # Save metadata

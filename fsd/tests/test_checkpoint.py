@@ -517,6 +517,63 @@ class TestCheckpointManager:
         # Verify .fsd files were not committed
         assert ".fsd/" not in committed_files or "regular.txt" in committed_files
 
+    def test_checkpoint_no_empty_commits(self, checkpoint_manager, git_repo):
+        """Test that checkpoints don't create empty commits when there are no changes."""
+        # Get current commit hash
+        initial_commit = checkpoint_manager.git.get_current_commit()
+
+        # Create checkpoint without making any changes
+        checkpoint = checkpoint_manager.create_checkpoint(
+            task_id="test-task",
+            checkpoint_type=CheckpointType.PRE_EXECUTION,
+            description="Checkpoint without changes",
+        )
+
+        # Verify checkpoint references the same commit (no new commit was created)
+        assert checkpoint.commit_hash == initial_commit
+
+        # Verify metadata indicates no new commit was created
+        assert checkpoint.metadata.get("new_commit_created") is False
+
+        # Verify git log shows the same commit count
+        import subprocess
+        result = subprocess.run(
+            ["git", "rev-list", "--count", "HEAD"],
+            cwd=git_repo,
+            capture_output=True,
+            text=True,
+        )
+        commit_count_after = int(result.stdout.strip())
+
+        # Should still be 1 (just the initial commit)
+        assert commit_count_after == 1
+
+    def test_checkpoint_creates_commit_with_changes(self, checkpoint_manager, git_repo):
+        """Test that checkpoints create commits when there are actual changes."""
+        # Get initial commit
+        initial_commit = checkpoint_manager.git.get_current_commit()
+
+        # Make a change
+        test_file = git_repo / "test_change.txt"
+        test_file.write_text("This is a change")
+
+        # Create checkpoint with changes
+        checkpoint = checkpoint_manager.create_checkpoint(
+            task_id="test-task",
+            checkpoint_type=CheckpointType.STEP_COMPLETE,
+            description="Checkpoint with changes",
+        )
+
+        # Verify a new commit was created
+        assert checkpoint.commit_hash != initial_commit
+
+        # Verify metadata indicates a new commit was created
+        assert checkpoint.metadata.get("new_commit_created") is True
+
+        # Verify the file was committed
+        assert not checkpoint_manager.git.has_uncommitted_changes()
+        assert test_file.exists()
+
 
 class TestCheckpointIntegration:
     """Integration tests for checkpoint system."""
