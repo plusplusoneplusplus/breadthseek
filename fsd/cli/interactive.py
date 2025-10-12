@@ -39,11 +39,13 @@ def show_menu() -> None:
     table.add_row("status", "Check system status")
     table.add_row("logs [task-id]", "View task logs")
     table.add_row("serve", "Start web interface")
-    table.add_row("?", "Show this help")
+    table.add_row("help [command]", "Show help (e.g., 'help queue')")
+    table.add_row("?", "Show this menu")
     table.add_row("quit", "Exit interactive mode")
 
     console.print("\n[bold]Available commands:[/bold]")
     console.print(table)
+    console.print("\n[dim]Tip: Use 'command --help' for detailed help (e.g., 'queue --help')[/dim]")
     console.print()
 
 
@@ -183,6 +185,25 @@ def _parse_command_input(input_str: str) -> list[str]:
     return parts if parts else []
 
 
+def _show_command_help(command: str) -> None:
+    """
+    Display help for a specific command by invoking it with --help.
+
+    Args:
+        command: The command name (e.g., "queue", "submit", "init").
+    """
+    cmd = ["fsd", command, "--help"]
+
+    console.print(f"\n[dim]Help for '{command}' command:[/dim]\n")
+
+    try:
+        result = subprocess.run(cmd, capture_output=False)
+        if result.returncode != 0:
+            console.print(f"\n[yellow]Could not retrieve help for '{command}'[/yellow]")
+    except Exception as e:
+        console.print(f"\n[red]Error retrieving help: {e}[/red]")
+
+
 def run_interactive_mode(
     continuous: bool = False, verbose: bool = False, config: Optional[Path] = None
 ) -> Optional[list[str]]:
@@ -211,7 +232,7 @@ def run_interactive_mode(
             console.print("[yellow]Goodbye![/yellow]")
             return None
 
-        # Handle help
+        # Handle help menu
         if choice == "?":
             show_menu()
             continue
@@ -223,6 +244,23 @@ def run_interactive_mode(
 
         base_cmd = cmd_parts[0]
         has_args = len(cmd_parts) > 1
+
+        # Handle 'help' command (e.g., 'help', 'help queue', 'help submit')
+        if base_cmd == "help":
+            if has_args:
+                # 'help <command>' - show help for specific command
+                target_cmd = cmd_parts[1]
+                _show_command_help(target_cmd)
+            else:
+                # Just 'help' - show the main menu
+                show_menu()
+            continue
+
+        # Handle 'command --help' syntax (e.g., 'queue --help', 'submit --help')
+        if has_args and cmd_parts[-1] == "--help":
+            # Remove --help and show help for the command
+            _show_command_help(base_cmd)
+            continue
 
         # Map command names and numbers to handlers
         handlers = {
