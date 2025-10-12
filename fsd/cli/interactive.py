@@ -1,9 +1,7 @@
 """Interactive mode for FSD CLI."""
 
 import subprocess
-import sys
 from pathlib import Path
-from typing import Optional
 
 import click
 from rich.console import Console
@@ -185,28 +183,85 @@ def _parse_command_input(input_str: str) -> list[str]:
     return parts if parts else []
 
 
-def _show_command_help(command: str) -> None:
+def _show_command_help(command: str, subcommand: str | None = None) -> None:
     """
     Display help for a specific command by invoking it with --help.
 
     Args:
         command: The command name (e.g., "queue", "submit", "init").
+        subcommand: Optional subcommand (e.g., "list" for "queue list").
     """
-    cmd = ["fsd", command, "--help"]
+    if subcommand:
+        cmd = ["fsd", command, subcommand, "--help"]
+        help_target = f"{command} {subcommand}"
+    else:
+        cmd = ["fsd", command, "--help"]
+        help_target = command
 
-    console.print(f"\n[dim]Help for '{command}' command:[/dim]\n")
+    console.print(f"\n[dim]Help for '{help_target}' command:[/dim]\n")
 
     try:
         result = subprocess.run(cmd, capture_output=False)
         if result.returncode != 0:
-            console.print(f"\n[yellow]Could not retrieve help for '{command}'[/yellow]")
+            console.print(f"\n[yellow]Could not retrieve help for '{help_target}'[/yellow]")
     except Exception as e:
         console.print(f"\n[red]Error retrieving help: {e}[/red]")
 
 
+def _command_requires_args(command: str, args: list[str]) -> tuple[bool, str | None]:
+    """
+    Check if a command requires additional arguments and is missing them.
+
+    Args:
+        command: The base command (e.g., "queue", "logs", "submit").
+        args: List of arguments provided after the command.
+
+    Returns:
+        Tuple of (requires_help, subcommand):
+        - requires_help: True if help should be shown
+        - subcommand: The subcommand if this is a group command, None otherwise
+    """
+    # Commands that require subcommands (command groups)
+    subcommand_groups = {
+        "queue": ["list", "start", "stop", "clear", "retry"],
+    }
+
+    # Check if it's a group command without a subcommand
+    if command in subcommand_groups:
+        if not args or args[0] not in subcommand_groups[command]:
+            # No subcommand or invalid subcommand - show help for the group
+            return (True, None)
+        # Valid subcommand provided
+        subcommand = args[0]
+
+        # Check if the subcommand itself requires arguments
+        if command == "queue" and subcommand == "retry":
+            # retry requires a task-id unless --all-failed is used
+            remaining_args = args[1:]
+            if not remaining_args or (len(remaining_args) == 1 and remaining_args[0] == "--all-failed"):
+                # Has --all-failed or will be handled by the command's own validation
+                return (False, None)
+            return (False, None)  # Let the actual command handle validation
+
+        return (False, None)
+
+    # For non-group commands, check if they need args
+    if command == "submit":
+        # submit requires either --text or a file path
+        if not args:
+            return (True, None)
+        # Check if it looks like a valid argument
+        has_text_flag = "--text" in args or "-t" in args
+        has_file_arg = any(not arg.startswith("-") for arg in args)
+        if not has_text_flag and not has_file_arg:
+            return (True, None)
+
+    return (False, None)
+
+
 def run_interactive_mode(
-    continuous: bool = False, verbose: bool = False, config: Optional[Path] = None
-) -> Optional[list[str]]:
+    continuous: bool = False, verbose: bool = False, config: Path | None = None
+) -> list[str] | None:
     """
     Run the interactive mode and return the command args to execute.
 
@@ -278,6 +333,16 @@ def run_interactive_mode(
             "serve": handle_serve,
         }
 
+        # Get the arguments (everything after the base command)
+        cmd_args_only = cmd_parts[1:] if has_args else []
+
+        # Check if this command needs help due to missing required arguments
+        needs_help, subcommand = _command_requires_args(base_cmd, cmd_args_only)
+        if needs_help:
+            # Show help instead of trying to execute
+            _show_command_help(base_cmd, subcommand)
+            continue
+
         # If command has arguments, try to execute directly
         if has_args:
             if continuous:
@@ -307,7 +372,7 @@ def run_interactive_mode(
                 return cmd_parts
 
 
-def _execute_command(cmd_args: list[str], verbose: bool, config: Optional[Path]) -> None:
+def _execute_command(cmd_args: list[str], verbose: bool, config: Path | None) -> None:
     """
     Execute a command with the given arguments.
 

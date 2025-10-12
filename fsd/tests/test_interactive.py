@@ -10,6 +10,7 @@ from fsd.cli.interactive import (
     run_interactive_mode,
     _parse_command_input,
     _show_command_help,
+    _command_requires_args,
     show_menu,
 )
 
@@ -48,6 +49,76 @@ class TestInteractiveParsing:
         assert result == []
 
 
+class TestCommandRequiresArgs:
+    """Test command argument requirement detection."""
+
+    def test_queue_without_subcommand_requires_help(self):
+        """Test that queue without subcommand requires help."""
+        needs_help, subcommand = _command_requires_args("queue", [])
+        assert needs_help is True
+        assert subcommand is None
+
+    def test_queue_with_invalid_subcommand_requires_help(self):
+        """Test that queue with invalid subcommand requires help."""
+        needs_help, subcommand = _command_requires_args("queue", ["invalid"])
+        assert needs_help is True
+        assert subcommand is None
+
+    def test_queue_with_valid_subcommand_no_help(self):
+        """Test that queue with valid subcommand doesn't require help."""
+        needs_help, subcommand = _command_requires_args("queue", ["list"])
+        assert needs_help is False
+        assert subcommand is None
+
+    def test_queue_start_no_help(self):
+        """Test that 'queue start' doesn't require help."""
+        needs_help, subcommand = _command_requires_args("queue", ["start"])
+        assert needs_help is False
+        assert subcommand is None
+
+    def test_queue_retry_with_task_id_no_help(self):
+        """Test that 'queue retry' with task ID doesn't require help."""
+        needs_help, subcommand = _command_requires_args("queue", ["retry", "task-123"])
+        assert needs_help is False
+        assert subcommand is None
+
+    def test_queue_retry_with_all_failed_no_help(self):
+        """Test that 'queue retry --all-failed' doesn't require help."""
+        needs_help, subcommand = _command_requires_args("queue", ["retry", "--all-failed"])
+        assert needs_help is False
+        assert subcommand is None
+
+    def test_submit_without_args_requires_help(self):
+        """Test that submit without args requires help."""
+        needs_help, subcommand = _command_requires_args("submit", [])
+        assert needs_help is True
+        assert subcommand is None
+
+    def test_submit_with_text_flag_no_help(self):
+        """Test that submit with --text flag doesn't require help."""
+        needs_help, subcommand = _command_requires_args("submit", ["--text", "my task"])
+        assert needs_help is False
+        assert subcommand is None
+
+    def test_submit_with_file_no_help(self):
+        """Test that submit with file path doesn't require help."""
+        needs_help, subcommand = _command_requires_args("submit", ["task.yaml"])
+        assert needs_help is False
+        assert subcommand is None
+
+    def test_status_no_args_no_help(self):
+        """Test that status without args doesn't require help."""
+        needs_help, subcommand = _command_requires_args("status", [])
+        assert needs_help is False
+        assert subcommand is None
+
+    def test_init_no_args_no_help(self):
+        """Test that init without args doesn't require help."""
+        needs_help, subcommand = _command_requires_args("init", [])
+        assert needs_help is False
+        assert subcommand is None
+
+
 class TestShowCommandHelp:
     """Test command help display."""
 
@@ -67,6 +138,26 @@ class TestShowCommandHelp:
 
         # Verify header was printed
         assert any("queue" in str(call_args) for call_args in mock_print.call_args_list)
+
+    @patch("fsd.cli.interactive.subprocess.run")
+    @patch("fsd.cli.interactive.console.print")
+    def test_show_help_for_queue_with_subcommand(self, mock_print, mock_run):
+        """Test showing help for queue subcommand."""
+        mock_run.return_value = Mock(returncode=0)
+
+        _show_command_help("queue", "list")
+
+        # Verify subprocess was called with correct command
+        mock_run.assert_called_once_with(
+            ["fsd", "queue", "list", "--help"],
+            capture_output=False
+        )
+
+        # Verify header was printed with both command and subcommand
+        assert any(
+            "queue list" in str(call_args)
+            for call_args in mock_print.call_args_list
+        )
 
     @patch("fsd.cli.interactive.subprocess.run")
     @patch("fsd.cli.interactive.console.print")
@@ -225,6 +316,52 @@ class TestInteractiveMode:
         # Should execute the command
         mock_execute.assert_called_once_with(["queue", "list"], False, None)
         assert result is None
+
+    @patch("fsd.cli.interactive.click.prompt")
+    @patch("fsd.cli.interactive.show_welcome")
+    @patch("fsd.cli.interactive.show_menu")
+    @patch("fsd.cli.interactive._show_command_help")
+    def test_queue_without_subcommand_shows_help(
+        self, mock_help, mock_menu, mock_welcome, mock_prompt
+    ):
+        """Test that 'queue' without subcommand shows help."""
+        mock_prompt.side_effect = ["queue", "quit"]
+
+        result = run_interactive_mode(continuous=False)
+
+        # Should show help for queue command
+        mock_help.assert_called_once_with("queue", None)
+        assert result is None
+
+    @patch("fsd.cli.interactive.click.prompt")
+    @patch("fsd.cli.interactive.show_welcome")
+    @patch("fsd.cli.interactive.show_menu")
+    @patch("fsd.cli.interactive._show_command_help")
+    def test_submit_without_args_shows_help(
+        self, mock_help, mock_menu, mock_welcome, mock_prompt
+    ):
+        """Test that 'submit' without args shows help."""
+        mock_prompt.side_effect = ["submit --verbose", "quit"]
+
+        result = run_interactive_mode(continuous=False)
+
+        # Should show help for submit command since --verbose is not --text or a file
+        mock_help.assert_called_once_with("submit", None)
+        assert result is None
+
+    @patch("fsd.cli.interactive.click.prompt")
+    @patch("fsd.cli.interactive.show_welcome")
+    @patch("fsd.cli.interactive.show_menu")
+    def test_queue_with_subcommand_executes(
+        self, mock_menu, mock_welcome, mock_prompt
+    ):
+        """Test that 'queue list' executes without showing help."""
+        mock_prompt.return_value = "queue list"
+
+        result = run_interactive_mode(continuous=False)
+
+        # Should return the command args, not show help
+        assert result == ["queue", "list"]
 
 
 class TestShowMenu:
