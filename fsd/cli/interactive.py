@@ -1,5 +1,6 @@
 """Interactive mode for FSD CLI."""
 
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -239,15 +240,30 @@ def _parse_command_input(input_str: str) -> list[str]:
     """
     Parse user input into command arguments.
 
+    Handles shell-style quoting so that arguments like --text "my text"
+    are parsed correctly.
+
     Args:
         input_str: The full command string from user.
 
     Returns:
         List of command arguments (e.g., ["queue", "start"]).
+
+    Examples:
+        >>> _parse_command_input('submit --text "my task"')
+        ['submit', '--text', 'my task']
+        >>> _parse_command_input('queue list')
+        ['queue', 'list']
     """
-    # Simple split by spaces - this gives us the command and its args
-    parts = input_str.split()
-    return parts if parts else []
+    try:
+        # Use shlex.split() to properly handle quoted strings
+        parts = shlex.split(input_str)
+        return parts if parts else []
+    except ValueError as e:
+        # If shlex fails (e.g., unclosed quote), fall back to simple split
+        console.print(f"[yellow]Warning: Failed to parse command (unclosed quote?): {e}[/yellow]")
+        parts = input_str.split()
+        return parts if parts else []
 
 
 def _show_command_help(command: str, subcommand: str | None = None) -> None:
