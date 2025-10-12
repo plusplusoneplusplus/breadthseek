@@ -35,6 +35,8 @@ def show_menu() -> None:
     table.add_row("  queue show", "Show task details")
     table.add_row("  queue start", "Start queue execution")
     table.add_row("  queue stop", "Stop queue execution")
+    table.add_row("task <task-id>", "Show any task (past/present)")
+    table.add_row("history", "Show all tasks ever executed")
     table.add_row("status", "Check system status")
     table.add_row("logs [task-id]", "View task logs")
     table.add_row("serve", "Start web interface")
