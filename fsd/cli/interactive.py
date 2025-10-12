@@ -32,6 +32,7 @@ def show_menu() -> None:
     table.add_row("submit", "Submit a new task")
     table.add_row("queue [action]", "Manage task queue")
     table.add_row("  queue list", "List tasks in queue")
+    table.add_row("  queue show", "Show task details")
     table.add_row("  queue start", "Start queue execution")
     table.add_row("  queue stop", "Stop queue execution")
     table.add_row("status", "Check system status")
@@ -113,15 +114,16 @@ def handle_queue() -> list[str]:
     console.print("\n[bold cyan]Queue Management[/bold cyan]")
     console.print("Choose action:")
     console.print("  [cyan]1[/cyan] - List tasks")
-    console.print("  [cyan]2[/cyan] - Start execution")
-    console.print("  [cyan]3[/cyan] - Stop execution")
-    console.print("  [cyan]4[/cyan] - Clear queue")
-    console.print("  [cyan]5[/cyan] - Retry task")
+    console.print("  [cyan]2[/cyan] - Show task details")
+    console.print("  [cyan]3[/cyan] - Start execution")
+    console.print("  [cyan]4[/cyan] - Stop execution")
+    console.print("  [cyan]5[/cyan] - Clear queue")
+    console.print("  [cyan]6[/cyan] - Retry task")
     console.print("  [cyan]0[/cyan] - Back to main menu")
 
     choice = click.prompt(
         "Your choice",
-        type=click.Choice(["0", "1", "2", "3", "4", "5"]),
+        type=click.Choice(["0", "1", "2", "3", "4", "5", "6"]),
         default="1",
     )
 
@@ -132,16 +134,27 @@ def handle_queue() -> list[str]:
     elif choice == "1":
         return ["queue", "list"]
     elif choice == "2":
-        return ["queue", "start"]
+        task_id = click.prompt("Enter task ID to view", type=str)
+        show_checkpoints = click.confirm("Show checkpoint history?", default=False)
+        show_logs = click.confirm("Show execution logs?", default=False)
+
+        cmd = ["queue", "show", task_id]
+        if show_checkpoints:
+            cmd.append("--checkpoints")
+        if show_logs:
+            cmd.append("--logs")
+        return cmd
     elif choice == "3":
-        return ["queue", "stop"]
+        return ["queue", "start"]
     elif choice == "4":
+        return ["queue", "stop"]
+    elif choice == "5":
         if click.confirm("Are you sure you want to clear the entire queue?", default=False):
             return ["queue", "clear"]
         else:
             console.print("[yellow]Queue clear cancelled[/yellow]")
             return []
-    elif choice == "5":
+    elif choice == "6":
         task_id = click.prompt("Enter task ID to retry", type=str)
         return ["queue", "retry", task_id]
 

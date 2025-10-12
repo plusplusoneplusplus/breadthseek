@@ -31,6 +31,7 @@ FSD_COMMANDS = {
         "stop": ["--force", "--help"],
         "clear": ["--help"],
         "retry": ["--all-failed", "--help"],
+        "show": ["--checkpoints", "-c", "--logs", "-l", "--help"],
     },
     "status": ["--watch", "-w", "--help"],
     "logs": ["--follow", "-f", "--tail", "-n", "--help"],

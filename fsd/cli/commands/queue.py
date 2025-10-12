@@ -374,6 +374,54 @@ def _execute_task(task: TaskDefinition, mode: str) -> None:
         raise
 
 
+@queue_group.command("show")
+@click.argument("task_id")
+@click.option("--checkpoints", "-c", is_flag=True, help="Show checkpoint history")
+@click.option("--logs", "-l", is_flag=True, help="Show execution logs summary")
+def show_command(task_id: str, checkpoints: bool, logs: bool) -> None:
+    """Show detailed information about a task.
+
+    Displays task definition, current status, checkpoint history,
+    and execution logs for the specified task.
+
+    Examples:
+        fsd queue show my-task              # Show task details
+        fsd queue show my-task --checkpoints # Include checkpoint history
+        fsd queue show my-task --logs       # Include logs summary
+        fsd queue show my-task -c -l        # Show everything
+    """
+    try:
+        fsd_dir = Path.cwd() / ".fsd"
+        if not fsd_dir.exists():
+            raise click.ClickException("FSD not initialized. Run 'fsd init' first.")
+
+        # Load task definition
+        task_file = fsd_dir / "queue" / f"{task_id}.yaml"
+        if not task_file.exists():
+            raise click.ClickException(f"Task '{task_id}' not found in queue")
+
+        task = load_task_from_yaml(task_file)
+        status = _get_task_status(task_id)
+
+        # Show task details
+        _display_task_details(task, status)
+
+        # Show state information
+        _display_task_state(task_id, fsd_dir)
+
+        # Show checkpoint history if requested
+        if checkpoints:
+            _display_checkpoint_history(task_id, fsd_dir)
+
+        # Show logs summary if requested
+        if logs:
+            _display_logs_summary(task_id, fsd_dir)
+
+    except Exception as e:
+        console.print(f"[red]Failed to show task details:[/red] {e}")
+        raise click.ClickException(f"Failed to show task: {e}")
+
+
 @queue_group.command("retry")
 @click.argument("task_id", required=False)
 @click.option(
@@ -512,3 +560,238 @@ def _update_task_status(task_id: str, status: str) -> None:
 
     with open(status_file, "w", encoding="utf-8") as f:
         json.dump(status_data, f, indent=2)
+
+
+def _display_task_details(task: TaskDefinition, status: str) -> None:
+    """Display detailed task information."""
+    from rich.text import Text
+
+    # Create status badge with color
+    status_colors = {
+        "queued": "blue",
+        "running": "yellow",
+        "completed": "green",
+        "failed": "red",
+    }
+    status_color = status_colors.get(status, "white")
+
+    # Build task info panel
+    task_info = []
+    task_info.append(f"[bold]Task ID:[/bold] {task.id}")
+    if task.numeric_id:
+        task_info.append(f"[bold]Numeric ID:[/bold] #{task.numeric_id}")
+    task_info.append(f"[bold]Status:[/bold] [{status_color}]{status}[/{status_color}]")
+    task_info.append(f"[bold]Priority:[/bold] {task.priority.value}")
+    task_info.append(f"[bold]Estimated Duration:[/bold] {task.estimated_duration}")
+    task_info.append("")
+    task_info.append(f"[bold]Description:[/bold]")
+    task_info.append(f"  {task.description}")
+
+    if task.context:
+        task_info.append("")
+        task_info.append(f"[bold]Context:[/bold]")
+        task_info.append(f"  {task.context}")
+
+    if task.focus_files:
+        task_info.append("")
+        task_info.append(f"[bold]Focus Files:[/bold]")
+        for file in task.focus_files:
+            task_info.append(f"  • {file}")
+
+    if task.success_criteria:
+        task_info.append("")
+        task_info.append(f"[bold]Success Criteria:[/bold]")
+        task_info.append(f"  {task.success_criteria}")
+
+    if task.on_completion:
+        task_info.append("")
+        task_info.append(f"[bold]On Completion:[/bold]")
+        if task.on_completion.create_pr:
+            task_info.append(f"  • Create PR: {task.on_completion.pr_title}")
+        if task.on_completion.notify_slack:
+            task_info.append(f"  • Notify Slack")
+
+    panel = Panel(
+        "\n".join(task_info),
+        title="[bold cyan]Task Details[/bold cyan]",
+        border_style="cyan",
+    )
+    console.print(panel)
+
+
+def _display_task_state(task_id: str, fsd_dir: Path) -> None:
+    """Display current task state machine information."""
+    state_file = fsd_dir / "state" / f"{task_id}.json"
+
+    if not state_file.exists():
+        return
+
+    try:
+        with open(state_file, "r", encoding="utf-8") as f:
+            state_data = json.load(f)
+
+        state_info = []
+        state_info.append(f"[bold]Current State:[/bold] {state_data.get('current_state', 'unknown')}")
+
+        created_at = state_data.get('created_at', 'N/A')
+        updated_at = state_data.get('updated_at', 'N/A')
+        state_info.append(f"[bold]Created:[/bold] {created_at}")
+        state_info.append(f"[bold]Updated:[/bold] {updated_at}")
+
+        retry_count = state_data.get('retry_count', 0)
+        if retry_count > 0:
+            state_info.append(f"[bold]Retry Count:[/bold] {retry_count}")
+
+        error = state_data.get('error_message')
+        if error:
+            state_info.append(f"[bold]Error:[/bold] {error}")
+
+        # Show last few state transitions
+        history = state_data.get('history', [])
+        if history:
+            state_info.append("")
+            state_info.append(f"[bold]Recent Transitions:[/bold]")
+            for entry in history[-5:]:  # Show last 5 transitions
+                from_state = entry.get('from_state', '?')
+                to_state = entry.get('to_state', '?')
+                timestamp = entry.get('timestamp', '?')
+                state_info.append(f"  {from_state} → {to_state} [{timestamp}]")
+
+        panel = Panel(
+            "\n".join(state_info),
+            title="[bold yellow]State Information[/bold yellow]",
+            border_style="yellow",
+        )
+        console.print(panel)
+
+    except Exception as e:
+        console.print(f"[dim]Could not load state information: {e}[/dim]")
+
+
+def _display_checkpoint_history(task_id: str, fsd_dir: Path) -> None:
+    """Display checkpoint history for the task."""
+    try:
+        checkpoint_manager = CheckpointManager(checkpoint_dir=fsd_dir / "checkpoints")
+        checkpoints = checkpoint_manager.list_checkpoints(task_id)
+
+        if not checkpoints:
+            console.print("[dim]No checkpoints found[/dim]")
+            return
+
+        # Create checkpoint table
+        table = Table(title="Checkpoint History")
+        table.add_column("Type", style="cyan")
+        table.add_column("Created", style="dim")
+        table.add_column("Commit", style="yellow", no_wrap=True)
+        table.add_column("Files", style="magenta")
+        table.add_column("Description", style="white")
+
+        for checkpoint in checkpoints:
+            created = checkpoint.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            commit_short = checkpoint.commit_hash[:8]
+            files_count = str(len(checkpoint.files_changed))
+            desc = checkpoint.description or "-"
+
+            # Truncate long descriptions
+            if len(desc) > 40:
+                desc = desc[:37] + "..."
+
+            table.add_row(
+                checkpoint.checkpoint_type.value,
+                created,
+                commit_short,
+                files_count,
+                desc,
+            )
+
+        console.print(table)
+
+        # Show summary stats
+        stats = checkpoint_manager.get_checkpoint_stats(task_id)
+        console.print(f"\n[dim]Total Checkpoints: {stats.total_checkpoints}[/dim]")
+        console.print(f"[dim]Total Files Changed: {stats.total_files_changed}[/dim]")
+        if stats.average_checkpoint_interval:
+            interval_min = stats.average_checkpoint_interval / 60
+            console.print(f"[dim]Average Interval: {interval_min:.1f} minutes[/dim]")
+
+    except Exception as e:
+        console.print(f"[yellow]Could not load checkpoint history: {e}[/yellow]")
+
+
+def _display_logs_summary(task_id: str, fsd_dir: Path) -> None:
+    """Display execution logs summary."""
+    log_file = fsd_dir / "logs" / f"{task_id}.jsonl"
+
+    if not log_file.exists():
+        console.print("[dim]No execution logs found[/dim]")
+        return
+
+    try:
+        entries = []
+        with open(log_file, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    entry = json.loads(line.strip())
+                    entries.append(entry)
+                except json.JSONDecodeError:
+                    continue
+
+        if not entries:
+            console.print("[dim]No log entries found[/dim]")
+            return
+
+        # Show summary
+        log_info = []
+        log_info.append(f"[bold]Total Log Entries:[/bold] {len(entries)}")
+
+        # Count by level
+        by_level = {}
+        for entry in entries:
+            level = entry.get('level', 'unknown')
+            by_level[level] = by_level.get(level, 0) + 1
+
+        if by_level:
+            log_info.append(f"[bold]By Level:[/bold]")
+            for level, count in sorted(by_level.items()):
+                log_info.append(f"  {level}: {count}")
+
+        # Show first and last entry timestamps
+        if entries:
+            first_time = entries[0].get('timestamp', 'N/A')
+            last_time = entries[-1].get('timestamp', 'N/A')
+            log_info.append(f"[bold]First Entry:[/bold] {first_time}")
+            log_info.append(f"[bold]Last Entry:[/bold] {last_time}")
+
+        panel = Panel(
+            "\n".join(log_info),
+            title="[bold green]Execution Logs Summary[/bold green]",
+            border_style="green",
+        )
+        console.print(panel)
+
+        # Show last few entries
+        console.print("\n[bold]Recent Log Entries:[/bold]")
+        for entry in entries[-10:]:  # Show last 10 entries
+            timestamp = entry.get('timestamp', '')[:19]  # Trim to readable length
+            level = entry.get('level', 'INFO')
+            message = entry.get('message', '')
+
+            # Color code by level
+            level_colors = {
+                'ERROR': 'red',
+                'WARNING': 'yellow',
+                'INFO': 'blue',
+                'DEBUG': 'dim',
+            }
+            level_color = level_colors.get(level, 'white')
+
+            # Truncate long messages
+            if len(message) > 80:
+                message = message[:77] + "..."
+
+            console.print(f"[dim]{timestamp}[/dim] [{level_color}]{level:7}[/{level_color}] {message}")
+
+        console.print(f"\n[dim]Full logs: {log_file}[/dim]")
+
+    except Exception as e:
+        console.print(f"[yellow]Could not load logs: {e}[/yellow]")
