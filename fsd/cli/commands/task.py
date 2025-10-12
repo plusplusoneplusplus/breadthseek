@@ -59,18 +59,19 @@ def show_command(task_id_or_number: str, checkpoints: bool, logs: bool) -> None:
         # Resolve task ID (numeric, partial, or full)
         task_id = resolve_task_id(task_id_or_number, fsd_dir)
 
+        # If resolution failed, pass the original input to _find_task_data()
+        # which has its own fallback resolution logic
         if not task_id:
-            raise click.ClickException(
-                f"Task '{task_id_or_number}' not found. "
-                f"Use 'fsd task list' to see available tasks."
-            )
+            task_id = task_id_or_number
 
         # Try to find task data from various sources
+        # _find_task_data can handle numeric IDs as a fallback
         task_info = _find_task_data(task_id, fsd_dir)
 
         if not task_info:
             raise click.ClickException(
-                f"Task '{task_id}' not found. No data exists for this task."
+                f"Task '{task_id_or_number}' not found. "
+                f"Use 'fsd task list' to see available tasks."
             )
 
         # Display what we found
@@ -92,9 +93,25 @@ def show_command(task_id_or_number: str, checkpoints: bool, logs: bool) -> None:
 def _find_task_data(task_id: str, fsd_dir: Path) -> Optional[dict]:
     """Find task data from all available sources.
 
+    This function can handle both full task IDs and numeric IDs. If a numeric
+    ID is provided and the task is not directly found, it will search through
+    all queue files to find a matching numeric ID.
+
+    Args:
+        task_id: Task ID (full ID, partial ID, or numeric ID as string)
+        fsd_dir: FSD directory path
+
     Returns:
         Dictionary with task information or None if not found
     """
+    # Check if task_id is actually a numeric ID that wasn't resolved
+    original_task_id = task_id
+    if task_id.lstrip("#").isdigit():
+        # Try to resolve numeric ID by searching queue files
+        resolved_id = _resolve_numeric_id_from_queue(int(task_id.lstrip("#")), fsd_dir)
+        if resolved_id:
+            task_id = resolved_id
+
     task_info = {
         "task_id": task_id,
         "task_def": None,
@@ -142,6 +159,35 @@ def _find_task_data(task_id: str, fsd_dir: Path) -> Optional[dict]:
         return None
 
     return task_info
+
+
+def _resolve_numeric_id_from_queue(numeric_id: int, fsd_dir: Path) -> Optional[str]:
+    """Resolve a numeric ID to a task ID by searching queue files.
+
+    This is a fallback mechanism for when the main resolver fails.
+    It only searches the queue directory for active tasks.
+
+    Args:
+        numeric_id: Numeric task ID to resolve
+        fsd_dir: FSD directory path
+
+    Returns:
+        Task ID if found, None otherwise
+    """
+    queue_dir = fsd_dir / "queue"
+    if not queue_dir.exists():
+        return None
+
+    for queue_file in sorted(queue_dir.glob("*.yaml")):
+        try:
+            task_def = load_task_from_yaml(queue_file)
+            if task_def.numeric_id == numeric_id:
+                return task_def.id
+        except Exception:
+            # Skip malformed files
+            continue
+
+    return None
 
 
 def _display_task_overview(task_info: dict) -> None:

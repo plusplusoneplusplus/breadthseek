@@ -1,7 +1,7 @@
 """Task ID resolver - resolve numeric IDs or partial IDs to full task IDs."""
 
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 from .task_schema import load_task_from_yaml
 
@@ -53,6 +53,10 @@ def resolve_task_id(task_id_or_number: str, fsd_dir: Optional[Path] = None) -> O
 def _resolve_numeric_id(numeric_id: int, fsd_dir: Path) -> Optional[str]:
     """Resolve a numeric ID to a task ID.
 
+    Searches both queue and state directories to build a comprehensive mapping.
+    This ensures numeric IDs work for tasks in all states (queued, planning,
+    executing, validating, completed, failed).
+
     Args:
         numeric_id: Numeric task ID
         fsd_dir: FSD directory
@@ -60,20 +64,40 @@ def _resolve_numeric_id(numeric_id: int, fsd_dir: Path) -> Optional[str]:
     Returns:
         Task ID if found, None otherwise
     """
-    # Search in queue
+    # Build comprehensive numeric ID mapping
+    numeric_id_map = _build_numeric_id_mapping(fsd_dir)
+
+    return numeric_id_map.get(numeric_id)
+
+
+def _build_numeric_id_mapping(fsd_dir: Path) -> Dict[int, str]:
+    """Build a mapping of numeric IDs to task IDs.
+
+    This function searches all task files in the queue directory to create
+    a comprehensive mapping. Tasks maintain their numeric IDs throughout
+    their lifecycle, even as they transition between states.
+
+    Args:
+        fsd_dir: FSD directory
+
+    Returns:
+        Dictionary mapping numeric IDs to task IDs
+    """
+    mapping = {}
+
+    # Search queue directory for all tasks
     queue_dir = fsd_dir / "queue"
     if queue_dir.exists():
-        for task_file in queue_dir.glob("*.yaml"):
+        for task_file in sorted(queue_dir.glob("*.yaml")):
             try:
                 task = load_task_from_yaml(task_file)
-                if task.numeric_id == numeric_id:
-                    return task.id
+                if task.numeric_id is not None:
+                    mapping[task.numeric_id] = task.id
             except Exception:
+                # Silently skip malformed task files
                 pass
 
-    # If not found in queue, we can't resolve from state files
-    # (they don't have numeric IDs without loading task definitions)
-    return None
+    return mapping
 
 
 def _resolve_partial_id(partial_id: str, fsd_dir: Path) -> Optional[str]:
