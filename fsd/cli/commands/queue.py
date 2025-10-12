@@ -308,12 +308,18 @@ def _execute_task(task: TaskDefinition, mode: str) -> None:
     # Set up log file for this task
     log_file = logs_dir / f"{task.id}.jsonl"
 
+    # Define progress callback for step updates
+    def progress_callback(step_num: int, total_steps: int, description: str) -> None:
+        """Display step progress to console."""
+        console.print(f"[cyan]Step {step_num}/{total_steps}:[/cyan] {description[:80]}")
+
     # Create phase executor
     executor = PhaseExecutor(
         state_machine=state_machine,
         checkpoint_manager=checkpoint_manager,
         claude_executor=claude_executor,
         log_file=log_file,
+        progress_callback=progress_callback,
     )
 
     try:

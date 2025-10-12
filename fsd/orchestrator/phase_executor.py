@@ -49,6 +49,7 @@ class PhaseExecutor:
         plan_storage: Optional[PlanStorage] = None,
         retry_strategy: Optional[RetryStrategy] = None,
         log_file: Optional[Path] = None,
+        progress_callback: Optional[callable] = None,
     ):
         """Initialize phase executor.
 
@@ -59,6 +60,7 @@ class PhaseExecutor:
             plan_storage: Plan storage (creates default if None)
             retry_strategy: Retry strategy (creates default if None)
             log_file: Optional path to task log file for detailed logging
+            progress_callback: Optional callback for progress updates (step_num, total_steps, description)
         """
         self.state_machine = state_machine
         self.checkpoint_manager = checkpoint_manager
@@ -66,6 +68,7 @@ class PhaseExecutor:
         self.plan_storage = plan_storage or PlanStorage()
         self.retry_strategy = retry_strategy or RetryStrategy(RetryConfig())
         self.log_file = log_file
+        self.progress_callback = progress_callback
     
     def _log_to_file(self, level: str, message: str, task_id: str, **extra):
         """Log a message to the task log file.
@@ -309,7 +312,15 @@ class PhaseExecutor:
                 step_number=step['step_number'],
                 total_steps=len(plan['steps'])
             )
-            
+
+            # Call progress callback if provided
+            if self.progress_callback:
+                self.progress_callback(
+                    step['step_number'],
+                    len(plan['steps']),
+                    step['description']
+                )
+
             # Execute step
             result = self.claude_executor.execute(
                 prompt=prompt,
