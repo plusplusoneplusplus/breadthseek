@@ -12,6 +12,7 @@ from rich.table import Table
 
 from fsd.core.task_schema import TaskDefinition, load_task_from_yaml
 from fsd.core.checkpoint_manager import CheckpointManager
+from fsd.core.task_resolver import resolve_task_id, get_task_display_name
 
 console = Console()
 
@@ -29,16 +30,22 @@ def task_group(ctx: click.Context) -> None:
 
 
 @task_group.command("show")
-@click.argument("task_id")
+@click.argument("task_id_or_number")
 @click.option("--checkpoints", "-c", is_flag=True, help="Show checkpoint history")
 @click.option("--logs", "-l", is_flag=True, help="Show execution logs summary")
-def show_command(task_id: str, checkpoints: bool, logs: bool) -> None:
+def show_command(task_id_or_number: str, checkpoints: bool, logs: bool) -> None:
     """Show detailed information about any task (past or present).
 
     This command works for tasks in the queue, completed tasks, and cleared tasks.
     It searches all FSD directories to find task information.
 
+    You can specify tasks by:
+    - Full task ID: "my-task-1234"
+    - Numeric ID: "4" or "#4"
+    - Partial ID: "my-task" (if unique)
+
     Examples:
+        fsd task show 4                    # Show task #4
         fsd task show my-task              # Show task details
         fsd task show my-task --checkpoints # Include checkpoint history
         fsd task show my-task --logs       # Include logs summary
@@ -48,6 +55,15 @@ def show_command(task_id: str, checkpoints: bool, logs: bool) -> None:
         fsd_dir = Path.cwd() / ".fsd"
         if not fsd_dir.exists():
             raise click.ClickException("FSD not initialized. Run 'fsd init' first.")
+
+        # Resolve task ID (numeric, partial, or full)
+        task_id = resolve_task_id(task_id_or_number, fsd_dir)
+
+        if not task_id:
+            raise click.ClickException(
+                f"Task '{task_id_or_number}' not found. "
+                f"Use 'fsd task list' to see available tasks."
+            )
 
         # Try to find task data from various sources
         task_info = _find_task_data(task_id, fsd_dir)

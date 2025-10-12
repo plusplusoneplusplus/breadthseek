@@ -15,6 +15,7 @@ from fsd.core.state_machine import TaskStateMachine
 from fsd.core.state_persistence import StatePersistence
 from fsd.core.checkpoint_manager import CheckpointManager
 from fsd.core.claude_executor import ClaudeExecutor
+from fsd.core.task_resolver import resolve_task_id
 from fsd.orchestrator.phase_executor import PhaseExecutor
 from fsd.tracking.activity_logger import ActivityLogger
 
@@ -119,17 +120,23 @@ def list_command(status: str) -> None:
     default="interactive",
     help="Execution mode",
 )
-@click.option("--task-id", "-t", help="Execute specific task only")
+@click.option("--task-id", "-t", help="Execute specific task (supports numeric ID, e.g., '4')")
 def start_command(mode: str, task_id: str) -> None:
     """Start task execution.
 
     Begins processing tasks in the queue according to their priority
     and dependencies.
 
+    You can specify a task by:
+    - Numeric ID (e.g., "4" or "#4")
+    - Full task ID (e.g., "fix-login-bug-a1b2c3")
+    - Partial task ID (e.g., "fix-login")
+
     Examples:
         fsd queue start                     # Interactive mode
         fsd queue start --mode autonomous   # Autonomous mode
         fsd queue start --mode overnight    # Overnight mode
+        fsd queue start --task-id 4         # Execute task by numeric ID
         fsd queue start --task-id my-task   # Execute specific task
     """
     try:
@@ -144,17 +151,25 @@ def start_command(mode: str, task_id: str) -> None:
             return
 
         if task_id:
+            # Resolve task ID (supports numeric IDs, partial IDs, and full IDs)
+            resolved_task_id = resolve_task_id(task_id, fsd_dir)
+            if not resolved_task_id:
+                raise click.ClickException(
+                    f"Task '{task_id}' not found. "
+                    "Use 'fsd queue list' to see available tasks."
+                )
+
             # Execute specific task
             task_found = False
             for task_info in tasks:
-                if task_info["task"].id == task_id:
+                if task_info["task"].id == resolved_task_id:
                     task_found = True
-                    console.print(f"[blue]Executing task:[/blue] {task_id}")
+                    console.print(f"[blue]Executing task:[/blue] {resolved_task_id}")
                     _execute_task(task_info["task"], mode)
                     break
 
             if not task_found:
-                raise click.ClickException(f"Task '{task_id}' not found in queue")
+                raise click.ClickException(f"Task '{resolved_task_id}' not found in queue")
         else:
             # Execute all queued tasks
             console.print(f"[blue]Starting execution in {mode} mode[/blue]")
@@ -375,16 +390,22 @@ def _execute_task(task: TaskDefinition, mode: str) -> None:
 
 
 @queue_group.command("show")
-@click.argument("task_id")
+@click.argument("task_id_or_number")
 @click.option("--checkpoints", "-c", is_flag=True, help="Show checkpoint history")
 @click.option("--logs", "-l", is_flag=True, help="Show execution logs summary")
-def show_command(task_id: str, checkpoints: bool, logs: bool) -> None:
+def show_command(task_id_or_number: str, checkpoints: bool, logs: bool) -> None:
     """Show detailed information about a task.
 
     Displays task definition, current status, checkpoint history,
     and execution logs for the specified task.
 
+    You can specify the task by:
+    - Numeric ID (e.g., "4" or "#4")
+    - Full task ID (e.g., "fix-login-bug-a1b2c3")
+    - Partial task ID (e.g., "fix-login")
+
     Examples:
+        fsd queue show 4                    # Show task by numeric ID
         fsd queue show my-task              # Show task details
         fsd queue show my-task --checkpoints # Include checkpoint history
         fsd queue show my-task --logs       # Include logs summary
@@ -394,6 +415,14 @@ def show_command(task_id: str, checkpoints: bool, logs: bool) -> None:
         fsd_dir = Path.cwd() / ".fsd"
         if not fsd_dir.exists():
             raise click.ClickException("FSD not initialized. Run 'fsd init' first.")
+
+        # Resolve task ID (supports numeric IDs, partial IDs, and full IDs)
+        task_id = resolve_task_id(task_id_or_number, fsd_dir)
+        if not task_id:
+            raise click.ClickException(
+                f"Task '{task_id_or_number}' not found. "
+                "Use 'fsd queue list' to see available tasks."
+            )
 
         # Load task definition
         task_file = fsd_dir / "queue" / f"{task_id}.yaml"
@@ -423,28 +452,34 @@ def show_command(task_id: str, checkpoints: bool, logs: bool) -> None:
 
 
 @queue_group.command("retry")
-@click.argument("task_id", required=False)
+@click.argument("task_id_or_number", required=False)
 @click.option(
     "--all-failed",
     is_flag=True,
     help="Retry all failed tasks",
 )
-def retry_command(task_id: str, all_failed: bool) -> None:
+def retry_command(task_id_or_number: str, all_failed: bool) -> None:
     """Retry failed tasks.
 
     Resets the status of failed tasks back to queued so they can be executed again.
 
+    You can specify the task by:
+    - Numeric ID (e.g., "4" or "#4")
+    - Full task ID (e.g., "fix-login-bug-a1b2c3")
+    - Partial task ID (e.g., "fix-login")
+
     Examples:
+        fsd queue retry 4               # Retry task by numeric ID
         fsd queue retry my-task         # Retry specific task
         fsd queue retry --all-failed    # Retry all failed tasks
     """
     try:
-        if not task_id and not all_failed:
+        if not task_id_or_number and not all_failed:
             raise click.ClickException(
                 "Must provide either a task ID or use --all-failed flag"
             )
 
-        if task_id and all_failed:
+        if task_id_or_number and all_failed:
             raise click.ClickException(
                 "Cannot use both task ID and --all-failed flag"
             )
@@ -476,6 +511,14 @@ def retry_command(task_id: str, all_failed: bool) -> None:
 
         else:
             # Retry specific task
+            # Resolve task ID (supports numeric IDs, partial IDs, and full IDs)
+            task_id = resolve_task_id(task_id_or_number, fsd_dir)
+            if not task_id:
+                raise click.ClickException(
+                    f"Task '{task_id_or_number}' not found. "
+                    "Use 'fsd queue list' to see available tasks."
+                )
+
             task_status = _get_task_status(task_id)
 
             if task_status != "failed":
