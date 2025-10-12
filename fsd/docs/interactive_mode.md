@@ -12,25 +12,24 @@ fsd
 
 This will launch an interactive menu that operates in a continuous loop:
 
-1. **Type a command** - Simply type the command name (e.g., `status`, `submit`, `queue list`)
-2. **Add arguments** - Many commands support arguments (e.g., `queue start`, `logs task-123`)
-3. **Or use numbers** - You can also use numbers (1-6) for quick access
-4. **Get help** - Type `?` to see available commands anytime
-5. **Interactive prompts** - Commands without full args will prompt for needed parameters
-6. **Executing the command** - The command runs with your provided parameters
-7. **Seamless return** - Immediately returns to the command prompt for the next command
-8. **Repeat** - Continue executing commands until you type `quit`
+1. **Type any command** - Type the full command with arguments (e.g., `queue start`, `logs task-123 --follow`)
+2. **Universal support** - ALL commands and arguments are supported - just type what you want!
+3. **Interactive fallback** - Commands without arguments will prompt for needed parameters
+4. **Or use numbers** - You can also use numbers (1-6) for quick access to common commands
+5. **Get help** - Type `?` to see available commands anytime
+6. **Seamless execution** - Commands run immediately and return to the prompt
+7. **Repeat** - Continue executing commands until you type `quit`
 
-The interactive mode runs continuously, allowing you to execute multiple commands in sequence without re-launching the CLI. Type commands naturally with arguments!
+The interactive mode runs continuously with **full command support** - any command that works in `fsd <command>` will work here! Type commands naturally with all their arguments and flags.
 
 ## Features
 
-- **Natural command input** - Type command names directly (e.g., `status`, `queue list`)
-- **Command arguments** - Pass arguments inline (e.g., `queue start`, `logs task-123`)
-- **Number shortcuts** - Use numbers (1-6) for quick access
+- **Universal command support** - ANY command with arguments works (e.g., `serve --port 3000 --reload`)
+- **Full CLI compatibility** - If it works as `fsd <command>`, it works here
+- **Natural syntax** - Type commands exactly as you would in the terminal
+- **Number shortcuts** - Use numbers (1-6) for quick access to common commands
 - **Built-in help** - Type `?` to see all available commands
-- **Smart prompts** - Context-aware prompts when needed
-- **Input validation** - Ensures correct parameters before execution
+- **Smart prompts** - Commands without args fall back to interactive prompts
 - **Multiple exit options** - Type `quit`, `q`, or `exit` to leave
 
 ## Example Session
@@ -90,32 +89,42 @@ Command: quit
 Goodbye!
 ```
 
-## Quick Command Reference
+## Command Examples
 
-Commands you can type with arguments for instant execution:
+**The interactive mode supports ALL commands with full arguments!** Here are some examples:
 
 ```bash
-# Queue commands
+# Queue commands - any subcommand works
 queue list              # List all tasks
 queue start             # Start execution
 queue stop              # Stop execution
-queue clear             # Clear queue (with confirmation)
+queue clear             # Clear queue
 queue retry task-123    # Retry a specific task
 
-# Log commands
+# Logs - with any task ID and flags
 logs task-123           # View logs for a task
-logs task-123 --follow  # Follow logs in real-time
+logs task-456 --follow  # Follow logs in real-time
 
-# Status command
-status                  # Check system status
+# Serve - with all options
+serve --port 3000       # Custom port
+serve --port 8080 --reload  # With auto-reload
+
+# Status - with or without flags
+status                  # Basic status
+status --watch          # Watch mode (if supported)
+
+# Any other command
+init --project-path /path/to/project --git-auto-commit
+submit task.yaml
+submit --text "HIGH priority: Fix bug. Takes 30m"
 ```
 
-Commands that will prompt for parameters:
-- `init` - Prompts for project path and git settings
-- `submit` - Prompts for task text or YAML file
-- `queue` - Prompts for action selection
-- `logs` - Prompts for task ID
-- `serve` - Prompts for port and reload settings
+**Interactive prompts** - When you type commands WITHOUT arguments, you'll get helpful prompts:
+- `init` → Asks for project path and git settings
+- `submit` → Asks for task text or YAML file
+- `queue` → Shows menu of actions
+- `logs` → Asks for task ID
+- `serve` → Asks for port and reload settings
 
 ## Command-Specific Prompts
 
@@ -144,11 +153,11 @@ Commands that will prompt for parameters:
 
 ## Benefits
 
-- **Intuitive input** - Type command names naturally or use number shortcuts
+- **True CLI compatibility** - Use the full power of `fsd` commands without leaving interactive mode
+- **No limitations** - ALL commands, arguments, and flags are supported
+- **Natural workflow** - Type commands exactly as you would in the terminal
+- **Smart fallback** - Get interactive prompts when you need them, skip them when you don't
 - **Discoverable** - Type `?` anytime to see available commands
-- **No memorization** - Browse available options as you work
-- **Faster onboarding** - New users can explore features easily
-- **Reduced errors** - Guided input with validation
-- **Flexible workflow** - Switch between interactive and direct command modes
 - **Continuous operation** - Execute multiple commands without restarting the CLI
 - **Efficient task management** - Check status, submit tasks, and view logs in a single session
+- **Flexible** - Mix command-line style (`queue start`) with interactive prompts (`submit`)

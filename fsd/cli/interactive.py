@@ -168,44 +168,19 @@ def handle_serve() -> list[str]:
     return cmd_args
 
 
-def _try_direct_command(input_str: str) -> Optional[list[str]]:
+def _parse_command_input(input_str: str) -> list[str]:
     """
-    Try to parse and execute a command directly with arguments.
+    Parse user input into command arguments.
 
     Args:
-        input_str: The full command string with arguments.
+        input_str: The full command string from user.
 
     Returns:
-        Command args list if command can be executed directly, None otherwise.
+        List of command arguments (e.g., ["queue", "start"]).
     """
+    # Simple split by spaces - this gives us the command and its args
     parts = input_str.split()
-    if not parts:
-        return None
-
-    cmd = parts[0]
-    args = parts[1:]
-
-    # Commands that can be executed directly with arguments
-    if cmd == "queue" and args:
-        # queue list, queue start, queue stop, queue clear
-        if args[0] in ("list", "start", "stop", "clear"):
-            return ["queue", args[0]]
-        # queue retry <task-id>
-        elif args[0] == "retry" and len(args) == 2:
-            return ["queue", "retry", args[1]]
-
-    elif cmd == "logs" and args:
-        # logs <task-id> or logs <task-id> --follow
-        cmd_args = ["logs", args[0]]
-        if "--follow" in args or "-f" in args:
-            cmd_args.append("--follow")
-        return cmd_args
-
-    elif cmd == "status" and not args:
-        # status without arguments
-        return ["status"]
-
-    return None
+    return parts if parts else []
 
 
 def run_interactive_mode(
@@ -241,18 +216,13 @@ def run_interactive_mode(
             show_menu()
             continue
 
-        # Try direct command execution with arguments first
-        direct_cmd = _try_direct_command(choice)
-        if direct_cmd:
-            if continuous:
-                _execute_command(direct_cmd, verbose, config)
-                console.print()  # Add blank line for visual separation
-            else:
-                return direct_cmd
+        # Parse the input into command parts
+        cmd_parts = _parse_command_input(choice)
+        if not cmd_parts:
             continue
 
-        # Extract base command for handler lookup
-        base_cmd = choice.split()[0] if " " in choice else choice
+        base_cmd = cmd_parts[0]
+        has_args = len(cmd_parts) > 1
 
         # Map command names and numbers to handlers
         handlers = {
@@ -270,8 +240,16 @@ def run_interactive_mode(
             "serve": handle_serve,
         }
 
-        handler = handlers.get(base_cmd)
-        if handler:
+        # If command has arguments, try to execute directly
+        if has_args:
+            if continuous:
+                _execute_command(cmd_parts, verbose, config)
+                console.print()  # Add blank line for visual separation
+            else:
+                return cmd_parts
+        # If no arguments and matches a handler, use the handler
+        elif base_cmd in handlers:
+            handler = handlers[base_cmd]
             cmd_args = handler()
             if cmd_args:  # Only proceed if we have valid command args
                 if continuous:
@@ -282,9 +260,13 @@ def run_interactive_mode(
                     # Return command args for external execution
                     return cmd_args
             # If empty list returned (e.g., cancelled operation), show prompt again
+        # Otherwise, try to execute as-is (single word commands like "status")
         else:
-            console.print(f"[red]Unknown command: {user_input}[/red]")
-            console.print("[dim]Type '?' for help[/dim]\n")
+            if continuous:
+                _execute_command(cmd_parts, verbose, config)
+                console.print()
+            else:
+                return cmd_parts
 
 
 def _execute_command(cmd_args: list[str], verbose: bool, config: Optional[Path]) -> None:
