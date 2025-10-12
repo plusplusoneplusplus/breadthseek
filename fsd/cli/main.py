@@ -1,5 +1,7 @@
 """Main CLI entry point for FSD."""
 
+import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
@@ -14,12 +16,13 @@ from fsd.cli.commands.queue import queue_group
 from fsd.cli.commands.status import status_command
 from fsd.cli.commands.logs import logs_command
 from fsd.cli.commands.serve import serve_command
+from fsd.cli.interactive import run_interactive_mode
 from fsd.core.exceptions import FSDError
 
 console = Console()
 
 
-@click.group()
+@click.group(invoke_without_command=True)
 @click.option("--verbose", "-v", is_flag=True, help="Enable verbose output")
 @click.option(
     "--config",
@@ -56,6 +59,25 @@ def cli(ctx: click.Context, verbose: bool, config: Optional[Path]) -> None:
     # Set up console for verbose mode
     if verbose:
         console.print("[dim]FSD CLI starting with verbose output enabled[/dim]")
+
+    # If no subcommand was provided, enter interactive mode
+    if ctx.invoked_subcommand is None:
+        # Check if we're already in a re-invocation
+        if not os.environ.get("FSD_INTERACTIVE_MODE"):
+            cmd_args = run_interactive_mode()
+            if cmd_args:
+                # Re-invoke fsd with the selected command
+                env = os.environ.copy()
+                env["FSD_INTERACTIVE_MODE"] = "1"  # Prevent infinite loop
+
+                cmd = ["fsd"] + cmd_args
+                if verbose:
+                    cmd.append("--verbose")
+                if config:
+                    cmd.extend(["--config", str(config)])
+
+                result = subprocess.run(cmd, env=env)
+                sys.exit(result.returncode)
 
 
 # Add command groups and commands
