@@ -220,8 +220,7 @@ def run_interactive_mode(
                 if continuous:
                     # Execute the command and loop back to prompt
                     _execute_command(cmd_args, verbose, config)
-                    console.print("\n[dim]Press Enter to continue...[/dim]")
-                    input()
+                    console.print()  # Add blank line for visual separation
                 else:
                     # Return command args for external execution
                     return cmd_args

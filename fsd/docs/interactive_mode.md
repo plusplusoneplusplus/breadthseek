@@ -17,7 +17,7 @@ This will launch an interactive menu that operates in a continuous loop:
 3. **Get help** - Type `?` to see available commands anytime
 4. **Providing parameters** - The CLI will prompt for required parameters based on your command
 5. **Executing the command** - The selected command runs with your provided parameters
-6. **Return to prompt** - After command completion, press Enter to continue
+6. **Seamless return** - Immediately returns to the command prompt for the next command
 7. **Repeat** - Continue executing commands until you type `quit`
 
 The interactive mode runs continuously, allowing you to execute multiple commands in sequence without re-launching the CLI. Just type what you want!
@@ -58,8 +58,6 @@ Executing: fsd status
 │ Task Queue: 0 queued, 0 running, 5 completed, 0 failed         │
 ╰─────────────────────────────────────────────────────────────────╯
 
-Press Enter to continue...
-
 Command: ?
 
 Available commands:
@@ -85,8 +83,6 @@ Task description: Add user authentication feature
 Executing: fsd submit --text "Add user authentication feature"
 
 [... command output ...]
-
-Press Enter to continue...
 
 Command: quit
 Goodbye!
