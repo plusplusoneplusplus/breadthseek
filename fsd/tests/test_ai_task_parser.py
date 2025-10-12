@@ -40,7 +40,8 @@ class TestAITaskParser:
         task = parser.parse_task("HIGH priority: Fix login bug in auth.py. Should take 30m")
 
         # Verify
-        assert task.id == "fix-login-bug"
+        # Task ID should start with expected base and have random suffix added
+        assert task.id.startswith("fix-login-bug-")
         assert task.description == "Fix login bug in auth.py"
         assert task.priority == Priority.HIGH
         assert task.estimated_duration == "30m"
@@ -77,7 +78,8 @@ class TestAITaskParser:
         )
 
         # Verify
-        assert task.id == "implement-caching-layer"
+        # Task ID should start with expected base and have random suffix added
+        assert task.id.startswith("implement-caching-layer-")
         assert task.description == "Implement caching layer for API with Redis"
         assert task.priority == Priority.MEDIUM
         assert task.estimated_duration == "2h"
@@ -153,7 +155,8 @@ Here's the parsed task:
         task = parser.parse_task("Fix authentication bug in login system")
 
         # Verify
-        assert task.id == "fix-authentication-bug"
+        # Task ID should start with expected base and have random suffix added
+        assert task.id.startswith("fix-authentication-bug-")
         assert task.description == "Fix authentication bug in login system"
         assert task.priority == Priority.MEDIUM
 

@@ -201,9 +201,10 @@ Task description: "{text}"
 
 Parse it into a structured task with these fields:
 
-1. **id**: Generate a short, descriptive task ID (lowercase, hyphens, max 50 chars)
-   - Example: "fix-login-bug", "refactor-payment-module"
+1. **id**: Generate a short, descriptive task ID with random suffix (lowercase, hyphens, max 50 chars)
+   - Example: "fix-login-bug-1234", "refactor-payment-module-5678"
    - Take significant words, skip stop words like "the", "a", "and"
+   - MUST include a 4-digit random suffix (1000-9999) at the end to prevent collisions
 
 2. **description**: Clean, complete task description (preserve key details)
    - Remove priority/duration keywords if explicit
@@ -240,7 +241,7 @@ Parse it into a structured task with these fields:
 Return ONLY valid JSON in this exact format (no markdown, no explanation):
 
 {{
-  "id": "task-id-here",
+  "id": "task-id-here-1234",
   "description": "Clean description here",
   "priority": "medium",
   "estimated_duration": "1h",
@@ -310,6 +311,10 @@ Requirements:
             AITaskParserError: If data is invalid
         """
         try:
+            # Ensure task ID has a random suffix for uniqueness
+            task_id = data["id"]
+            task_id = self._ensure_unique_suffix(task_id)
+
             # Build completion actions
             on_completion = CompletionActions(
                 create_pr=True,
@@ -319,7 +324,7 @@ Requirements:
 
             # Create task definition
             return TaskDefinition(
-                id=data["id"],
+                id=task_id,
                 description=data["description"],
                 priority=Priority(data.get("priority", "medium")),
                 estimated_duration=data.get("estimated_duration", "1h"),
@@ -337,3 +342,28 @@ Requirements:
             raise AITaskParserError(
                 f"Failed to build TaskDefinition: {e}"
             ) from e
+
+    def _ensure_unique_suffix(self, task_id: str) -> str:
+        """Ensure task ID has a 4-digit random suffix for uniqueness.
+
+        Args:
+            task_id: Original task ID
+
+        Returns:
+            Task ID with suffix (adds one if not present)
+        """
+        import random
+        import re
+
+        # Check if ID already ends with -XXXX pattern (4 digits)
+        if re.search(r'-\d{4}$', task_id):
+            return task_id
+
+        # Add random suffix
+        random_suffix = random.randint(1000, 9999)
+
+        # Truncate base if needed to keep total length <= 50
+        if len(task_id) + 5 > 50:  # 5 = len("-XXXX")
+            task_id = task_id[:45].rstrip('-')
+
+        return f"{task_id}-{random_suffix}"

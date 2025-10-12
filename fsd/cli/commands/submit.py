@@ -420,14 +420,16 @@ def _extract_focus_files(text: str) -> Tuple[Optional[List[str]], str]:
 
 
 def _generate_task_id(description: str) -> str:
-    """Generate a task ID from description.
+    """Generate a task ID from description with random suffix for uniqueness.
 
     Args:
         description: Task description
 
     Returns:
-        Generated task ID (lowercase, hyphens, max 50 chars)
+        Generated task ID (lowercase, hyphens, max 50 chars, with 4-digit suffix)
     """
+    import random
+
     # Take first significant words (up to 5)
     words = re.findall(r'\b[a-zA-Z]+\b', description.lower())
 
@@ -436,15 +438,21 @@ def _generate_task_id(description: str) -> str:
     significant_words = [w for w in words if w not in stop_words][:5]
 
     # Join with hyphens
-    task_id = '-'.join(significant_words)
+    base_id = '-'.join(significant_words)
 
     # Ensure minimum length
-    if len(task_id) < 3:
-        task_id = 'task-' + task_id
+    if len(base_id) < 3:
+        base_id = 'task-' + base_id
 
-    # Truncate if too long
+    # Add random 4-digit suffix to prevent collisions
+    random_suffix = random.randint(1000, 9999)
+    task_id = f"{base_id}-{random_suffix}"
+
+    # Truncate base if combined ID is too long (keep suffix intact)
     if len(task_id) > 50:
-        task_id = task_id[:50].rstrip('-')
+        max_base_len = 50 - 5  # Reserve 5 chars for "-XXXX"
+        base_id = base_id[:max_base_len].rstrip('-')
+        task_id = f"{base_id}-{random_suffix}"
 
     return task_id
 
