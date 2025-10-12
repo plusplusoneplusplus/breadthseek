@@ -127,10 +127,7 @@ class TestShowCommandHelp:
         _show_command_help("queue")
 
         # Verify subprocess was called with correct command
-        mock_run.assert_called_once_with(
-            ["fsd", "queue", "--help"],
-            capture_output=False
-        )
+        mock_run.assert_called_once_with(["fsd", "queue", "--help"], capture_output=False)
 
         # Verify header was printed
         assert any("queue" in str(call_args) for call_args in mock_print.call_args_list)
@@ -144,16 +141,10 @@ class TestShowCommandHelp:
         _show_command_help("queue", "list")
 
         # Verify subprocess was called with correct command
-        mock_run.assert_called_once_with(
-            ["fsd", "queue", "list", "--help"],
-            capture_output=False
-        )
+        mock_run.assert_called_once_with(["fsd", "queue", "list", "--help"], capture_output=False)
 
         # Verify header was printed with both command and subcommand
-        assert any(
-            "queue list" in str(call_args)
-            for call_args in mock_print.call_args_list
-        )
+        assert any("queue list" in str(call_args) for call_args in mock_print.call_args_list)
 
     @patch("fsd.cli.interactive.subprocess.run")
     @patch("fsd.cli.interactive.console.print")
@@ -163,10 +154,7 @@ class TestShowCommandHelp:
 
         _show_command_help("submit")
 
-        mock_run.assert_called_once_with(
-            ["fsd", "submit", "--help"],
-            capture_output=False
-        )
+        mock_run.assert_called_once_with(["fsd", "submit", "--help"], capture_output=False)
 
     @patch("fsd.cli.interactive.subprocess.run")
     @patch("fsd.cli.interactive.console.print")
@@ -180,8 +168,7 @@ class TestShowCommandHelp:
         mock_run.assert_called_once()
         # Should print warning about failure
         assert any(
-            "Could not retrieve help" in str(call_args)
-            for call_args in mock_print.call_args_list
+            "Could not retrieve help" in str(call_args) for call_args in mock_print.call_args_list
         )
 
     @patch("fsd.cli.interactive.subprocess.run")
@@ -194,8 +181,7 @@ class TestShowCommandHelp:
 
         # Should print error message
         assert any(
-            "Error retrieving help" in str(call_args)
-            for call_args in mock_print.call_args_list
+            "Error retrieving help" in str(call_args) for call_args in mock_print.call_args_list
         )
 
 
@@ -333,9 +319,7 @@ class TestInteractiveMode:
     @patch("fsd.cli.interactive.show_welcome")
     @patch("fsd.cli.interactive.show_menu")
     @patch("fsd.cli.interactive._show_command_help")
-    def test_submit_without_args_shows_help(
-        self, mock_help, mock_menu, mock_welcome, mock_prompt
-    ):
+    def test_submit_without_args_shows_help(self, mock_help, mock_menu, mock_welcome, mock_prompt):
         """Test that 'submit' without args shows help."""
         mock_prompt.side_effect = ["submit --verbose", "quit"]
 
@@ -348,9 +332,7 @@ class TestInteractiveMode:
     @patch("fsd.cli.interactive.click.prompt")
     @patch("fsd.cli.interactive.show_welcome")
     @patch("fsd.cli.interactive.show_menu")
-    def test_queue_with_subcommand_executes(
-        self, mock_menu, mock_welcome, mock_prompt
-    ):
+    def test_queue_with_subcommand_executes(self, mock_menu, mock_welcome, mock_prompt):
         """Test that 'queue list' executes without showing help."""
         mock_prompt.return_value = "queue list"
 
@@ -401,8 +383,7 @@ class TestHandleQueue:
 
         # Should print message about returning to main menu
         assert any(
-            "Returning to main menu" in str(call_args)
-            for call_args in mock_print.call_args_list
+            "Returning to main menu" in str(call_args) for call_args in mock_print.call_args_list
         )
 
     @patch("fsd.cli.interactive.console.print")
@@ -466,10 +447,7 @@ class TestHandleQueue:
         assert result == []
 
         # Should print cancellation message
-        assert any(
-            "cancelled" in str(call_args).lower()
-            for call_args in mock_print.call_args_list
-        )
+        assert any("cancelled" in str(call_args).lower() for call_args in mock_print.call_args_list)
 
     @patch("fsd.cli.interactive.console.print")
     @patch("fsd.cli.interactive.click.prompt")
@@ -484,3 +462,322 @@ class TestHandleQueue:
 
         # Should return command to retry task
         assert result == ["queue", "retry", "task-123"]
+
+
+class TestHandleInit:
+    """Test init handler functionality."""
+
+    @patch("fsd.cli.interactive.console.print")
+    @patch("fsd.cli.interactive.click.prompt")
+    def test_init_cancel_option(self, mock_prompt, mock_print):
+        """Test that selecting '0' in init menu returns empty list (cancel)."""
+        from fsd.cli.interactive import handle_init
+
+        # User selects option '0' (Cancel)
+        mock_prompt.return_value = "0"
+
+        result = handle_init()
+
+        # Should return empty list to indicate cancellation
+        assert result == []
+
+        # Should print message about returning to main menu
+        assert any(
+            "Returning to main menu" in str(call_args) for call_args in mock_print.call_args_list
+        )
+
+    @patch("fsd.cli.interactive.console.print")
+    @patch("fsd.cli.interactive.click.prompt")
+    @patch("fsd.cli.interactive.click.confirm")
+    def test_init_continue_option(self, mock_confirm, mock_prompt, mock_print):
+        """Test that selecting '1' and providing inputs returns init command."""
+        from fsd.cli.interactive import handle_init
+
+        # Mock prompts: choice '1', project path '.', and confirm for git
+        mock_prompt.side_effect = ["1", "."]
+        mock_confirm.return_value = True
+
+        result = handle_init()
+
+        # Should return command to init with auto-commit enabled
+        assert result == ["init", "--project-path", ".", "--git-auto-commit"]
+
+    @patch("fsd.cli.interactive.console.print")
+    @patch("fsd.cli.interactive.click.prompt")
+    @patch("fsd.cli.interactive.click.confirm")
+    def test_init_custom_path_no_git(self, mock_confirm, mock_prompt, mock_print):
+        """Test init with custom project path and git auto-commit disabled."""
+        from fsd.cli.interactive import handle_init
+
+        # Mock prompts: choice '1', custom path, and decline git
+        mock_prompt.side_effect = ["1", "/custom/path"]
+        mock_confirm.return_value = False
+
+        result = handle_init()
+
+        # Should return command to init without auto-commit
+        assert result == ["init", "--project-path", "/custom/path"]
+
+
+class TestHandleSubmit:
+    """Test submit handler functionality."""
+
+    @patch("fsd.cli.interactive.console.print")
+    @patch("fsd.cli.interactive.click.prompt")
+    def test_submit_cancel_option(self, mock_prompt, mock_print):
+        """Test that selecting '0' in submit menu returns empty list (cancel)."""
+        from fsd.cli.interactive import handle_submit
+
+        # User selects option '0' (Cancel)
+        mock_prompt.return_value = "0"
+
+        result = handle_submit()
+
+        # Should return empty list to indicate cancellation
+        assert result == []
+
+        # Should print message about returning to main menu
+        assert any(
+            "Returning to main menu" in str(call_args) for call_args in mock_print.call_args_list
+        )
+
+    @patch("fsd.cli.interactive.console.print")
+    @patch("fsd.cli.interactive.click.prompt")
+    def test_submit_text_option(self, mock_prompt, mock_print):
+        """Test that selecting '1' prompts for text and returns submit command."""
+        from fsd.cli.interactive import handle_submit
+
+        # Mock two prompts: first for menu choice, second for task description
+        mock_prompt.side_effect = ["1", "Fix the login bug"]
+
+        result = handle_submit()
+
+        # Should return command to submit via text
+        assert result == ["submit", "--text", "Fix the login bug"]
+
+    @patch("fsd.cli.interactive.console.print")
+    @patch("fsd.cli.interactive.click.prompt")
+    def test_submit_yaml_option(self, mock_prompt, mock_print):
+        """Test that selecting '2' prompts for file path and returns submit command."""
+        from fsd.cli.interactive import handle_submit
+
+        # Mock two prompts: first for menu choice, second for file path
+        mock_prompt.side_effect = ["2", "task.yaml"]
+
+        result = handle_submit()
+
+        # Should return command to submit via YAML file
+        assert result == ["submit", "task.yaml"]
+
+
+class TestHandleStatus:
+    """Test status handler functionality."""
+
+    @patch("fsd.cli.interactive.console.print")
+    @patch("fsd.cli.interactive.click.prompt")
+    def test_status_cancel_option(self, mock_prompt, mock_print):
+        """Test that selecting '0' in status menu returns empty list (cancel)."""
+        from fsd.cli.interactive import handle_status
+
+        # User selects option '0' (Cancel)
+        mock_prompt.return_value = "0"
+
+        result = handle_status()
+
+        # Should return empty list to indicate cancellation
+        assert result == []
+
+        # Should print message about returning to main menu
+        assert any(
+            "Returning to main menu" in str(call_args) for call_args in mock_print.call_args_list
+        )
+
+    @patch("fsd.cli.interactive.console.print")
+    @patch("fsd.cli.interactive.click.prompt")
+    @patch("fsd.cli.interactive.click.confirm")
+    def test_status_show_without_watch(self, mock_confirm, mock_prompt, mock_print):
+        """Test that selecting '1' and declining watch returns status command."""
+        from fsd.cli.interactive import handle_status
+
+        # User selects option '1' (Show status) and declines watch mode
+        mock_prompt.return_value = "1"
+        mock_confirm.return_value = False
+
+        result = handle_status()
+
+        # Should return command to show status without watch
+        assert result == ["status"]
+
+    @patch("fsd.cli.interactive.console.print")
+    @patch("fsd.cli.interactive.click.prompt")
+    @patch("fsd.cli.interactive.click.confirm")
+    def test_status_show_with_watch(self, mock_confirm, mock_prompt, mock_print):
+        """Test that selecting '1' and enabling watch returns status command with --watch."""
+        from fsd.cli.interactive import handle_status
+
+        # User selects option '1' (Show status) and enables watch mode
+        mock_prompt.return_value = "1"
+        mock_confirm.return_value = True
+
+        result = handle_status()
+
+        # Should return command to show status with watch
+        assert result == ["status", "--watch"]
+
+
+class TestHandleLogs:
+    """Test logs handler functionality."""
+
+    @patch("fsd.cli.interactive.console.print")
+    @patch("fsd.cli.interactive.click.prompt")
+    def test_logs_cancel_option(self, mock_prompt, mock_print):
+        """Test that selecting '0' in logs menu returns empty list (cancel)."""
+        from fsd.cli.interactive import handle_logs
+
+        # User selects option '0' (Cancel)
+        mock_prompt.return_value = "0"
+
+        result = handle_logs()
+
+        # Should return empty list to indicate cancellation
+        assert result == []
+
+        # Should print message about returning to main menu
+        assert any(
+            "Returning to main menu" in str(call_args) for call_args in mock_print.call_args_list
+        )
+
+    @patch("fsd.cli.interactive.console.print")
+    @patch("fsd.cli.interactive.click.prompt")
+    @patch("fsd.cli.interactive.click.confirm")
+    def test_logs_view_with_task_id_no_follow(self, mock_confirm, mock_prompt, mock_print):
+        """Test that selecting '1' with task ID and no follow returns logs command."""
+        from fsd.cli.interactive import handle_logs
+
+        # User selects option '1' (View logs), provides task ID, and declines follow mode
+        mock_prompt.side_effect = ["1", "task-123"]
+        mock_confirm.return_value = False
+
+        result = handle_logs()
+
+        # Should return command to view logs for task-123
+        assert result == ["logs", "task-123"]
+
+    @patch("fsd.cli.interactive.console.print")
+    @patch("fsd.cli.interactive.click.prompt")
+    @patch("fsd.cli.interactive.click.confirm")
+    def test_logs_view_with_task_id_with_follow(self, mock_confirm, mock_prompt, mock_print):
+        """Test that selecting '1' with task ID and follow returns logs command with --follow."""
+        from fsd.cli.interactive import handle_logs
+
+        # User selects option '1' (View logs), provides task ID, and enables follow mode
+        mock_prompt.side_effect = ["1", "task-123"]
+        mock_confirm.return_value = True
+
+        result = handle_logs()
+
+        # Should return command to view logs for task-123 with follow
+        assert result == ["logs", "task-123", "--follow"]
+
+    @patch("fsd.cli.interactive.console.print")
+    @patch("fsd.cli.interactive.click.prompt")
+    @patch("fsd.cli.interactive.click.confirm")
+    def test_logs_view_latest_no_follow(self, mock_confirm, mock_prompt, mock_print):
+        """Test that selecting '1' with empty task ID (latest) and no follow returns logs command."""
+        from fsd.cli.interactive import handle_logs
+
+        # User selects option '1' (View logs), presses Enter for latest, and declines follow mode
+        mock_prompt.side_effect = ["1", ""]
+        mock_confirm.return_value = False
+
+        result = handle_logs()
+
+        # Should return command to view logs without task ID (latest)
+        assert result == ["logs"]
+
+    @patch("fsd.cli.interactive.console.print")
+    @patch("fsd.cli.interactive.click.prompt")
+    @patch("fsd.cli.interactive.click.confirm")
+    def test_logs_view_latest_with_follow(self, mock_confirm, mock_prompt, mock_print):
+        """Test that selecting '1' with empty task ID and follow returns logs command with --follow."""
+        from fsd.cli.interactive import handle_logs
+
+        # User selects option '1' (View logs), presses Enter for latest, and enables follow mode
+        mock_prompt.side_effect = ["1", ""]
+        mock_confirm.return_value = True
+
+        result = handle_logs()
+
+        # Should return command to view logs with follow
+        assert result == ["logs", "--follow"]
+
+
+class TestHandleServe:
+    """Test serve handler functionality."""
+
+    @patch("fsd.cli.interactive.console.print")
+    @patch("fsd.cli.interactive.click.prompt")
+    def test_serve_cancel_option(self, mock_prompt, mock_print):
+        """Test that selecting '0' in serve menu returns empty list (cancel)."""
+        from fsd.cli.interactive import handle_serve
+
+        # User selects option '0' (Cancel)
+        mock_prompt.return_value = "0"
+
+        result = handle_serve()
+
+        # Should return empty list to indicate cancellation
+        assert result == []
+
+        # Should print message about returning to main menu
+        assert any(
+            "Returning to main menu" in str(call_args) for call_args in mock_print.call_args_list
+        )
+
+    @patch("fsd.cli.interactive.console.print")
+    @patch("fsd.cli.interactive.click.prompt")
+    @patch("fsd.cli.interactive.click.confirm")
+    def test_serve_start_without_reload(self, mock_confirm, mock_prompt, mock_print):
+        """Test that selecting '1' and declining reload returns serve command."""
+        from fsd.cli.interactive import handle_serve
+
+        # User selects option '1' (Start), provides port, and declines reload
+        mock_prompt.side_effect = ["1", 8080]
+        mock_confirm.return_value = False
+
+        result = handle_serve()
+
+        # Should return command to start serve on port 8080 without reload
+        assert result == ["serve", "--port", "8080"]
+
+    @patch("fsd.cli.interactive.console.print")
+    @patch("fsd.cli.interactive.click.prompt")
+    @patch("fsd.cli.interactive.click.confirm")
+    def test_serve_start_with_reload(self, mock_confirm, mock_prompt, mock_print):
+        """Test that selecting '1' and enabling reload returns serve command with --reload."""
+        from fsd.cli.interactive import handle_serve
+
+        # User selects option '1' (Start), provides port, and enables reload
+        mock_prompt.side_effect = ["1", 3000]
+        mock_confirm.return_value = True
+
+        result = handle_serve()
+
+        # Should return command to start serve on port 3000 with reload
+        assert result == ["serve", "--port", "3000", "--reload"]
+
+    @patch("fsd.cli.interactive.console.print")
+    @patch("fsd.cli.interactive.click.prompt")
+    @patch("fsd.cli.interactive.click.confirm")
+    def test_serve_start_default_port_no_reload(self, mock_confirm, mock_prompt, mock_print):
+        """Test that selecting '1' with default port and no reload returns serve command."""
+        from fsd.cli.interactive import handle_serve
+
+        # User selects option '1' (Start), uses default port 8000, and declines reload
+        mock_prompt.side_effect = ["1", 8000]
+        mock_confirm.return_value = False
+
+        result = handle_serve()
+
+        # Should return command to start serve on default port 8000
+        assert result == ["serve", "--port", "8000"]

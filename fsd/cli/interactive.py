@@ -50,6 +50,16 @@ def show_menu() -> None:
 def handle_init() -> list[str]:
     """Handle init command interactively."""
     console.print("\n[bold cyan]Initialize FSD[/bold cyan]")
+    console.print("[dim]This will initialize FSD in your project.[/dim]")
+    console.print("  [cyan]1[/cyan] - Continue with initialization")
+    console.print("  [cyan]0[/cyan] - Cancel")
+
+    choice = click.prompt("Your choice", type=click.Choice(["0", "1"]), default="1")
+
+    if choice == "0":
+        # User wants to cancel
+        console.print("[dim]Returning to main menu...[/dim]")
+        return []
 
     project_path = click.prompt(
         "Project path",
@@ -75,11 +85,18 @@ def handle_submit() -> list[str]:
     console.print("Choose submission method:")
     console.print("  [cyan]1[/cyan] - Natural language text")
     console.print("  [cyan]2[/cyan] - YAML file")
+    console.print("  [cyan]0[/cyan] - Cancel")
 
-    choice = click.prompt("Your choice", type=click.Choice(["1", "2"]), default="1")
+    choice = click.prompt("Your choice", type=click.Choice(["0", "1", "2"]), default="1")
 
-    if choice == "1":
-        console.print("\n[dim]Enter your task description. Can include priority and time estimate.[/dim]")
+    if choice == "0":
+        # User wants to cancel
+        console.print("[dim]Returning to main menu...[/dim]")
+        return []
+    elif choice == "1":
+        console.print(
+            "\n[dim]Enter your task description. Can include priority and time estimate.[/dim]"
+        )
         console.print("[dim]Example: HIGH priority: Fix login bug. Takes 30m[/dim]\n")
 
         text = click.prompt("Task description", type=str)
@@ -132,6 +149,15 @@ def handle_queue() -> list[str]:
 def handle_status() -> list[str]:
     """Handle status command interactively."""
     console.print("\n[bold cyan]System Status[/bold cyan]")
+    console.print("  [cyan]1[/cyan] - Show status")
+    console.print("  [cyan]0[/cyan] - Cancel")
+
+    choice = click.prompt("Your choice", type=click.Choice(["0", "1"]), default="1")
+
+    if choice == "0":
+        # User wants to cancel
+        console.print("[dim]Returning to main menu...[/dim]")
+        return []
 
     watch = click.confirm("Watch mode (auto-refresh)?", default=False)
 
@@ -145,6 +171,15 @@ def handle_status() -> list[str]:
 def handle_logs() -> list[str]:
     """Handle logs command interactively."""
     console.print("\n[bold cyan]View Logs[/bold cyan]")
+    console.print("  [cyan]1[/cyan] - View logs")
+    console.print("  [cyan]0[/cyan] - Cancel")
+
+    choice = click.prompt("Your choice", type=click.Choice(["0", "1"]), default="1")
+
+    if choice == "0":
+        # User wants to cancel
+        console.print("[dim]Returning to main menu...[/dim]")
+        return []
 
     task_id = click.prompt("Task ID (or press Enter for latest)", default="", type=str)
 
@@ -162,6 +197,15 @@ def handle_logs() -> list[str]:
 def handle_serve() -> list[str]:
     """Handle serve command interactively."""
     console.print("\n[bold cyan]Start Web Interface[/bold cyan]")
+    console.print("  [cyan]1[/cyan] - Start web interface")
+    console.print("  [cyan]0[/cyan] - Cancel")
+
+    choice = click.prompt("Your choice", type=click.Choice(["0", "1"]), default="1")
+
+    if choice == "0":
+        # User wants to cancel
+        console.print("[dim]Returning to main menu...[/dim]")
+        return []
 
     port = click.prompt("Port", default=8000, type=int)
     reload = click.confirm("Enable auto-reload?", default=False)
@@ -243,7 +287,9 @@ def _command_requires_args(command: str, args: list[str]) -> tuple[bool, str | N
         if command == "queue" and subcommand == "retry":
             # retry requires a task-id unless --all-failed is used
             remaining_args = args[1:]
-            if not remaining_args or (len(remaining_args) == 1 and remaining_args[0] == "--all-failed"):
+            if not remaining_args or (
+                len(remaining_args) == 1 and remaining_args[0] == "--all-failed"
+            ):
                 # Has --all-failed or will be handled by the command's own validation
                 return (False, None)
             return (False, None)  # Let the actual command handle validation
