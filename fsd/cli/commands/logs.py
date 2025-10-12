@@ -9,11 +9,13 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.syntax import Syntax
 
+from fsd.core.task_resolver import resolve_task_id
+
 console = Console()
 
 
 @click.command()
-@click.argument("task_id", required=False)
+@click.argument("task_id_or_number", required=False)
 @click.option("--follow", "-f", is_flag=True, help="Follow log output in real-time")
 @click.option(
     "--lines", "-n", type=int, default=50, help="Number of lines to show (default: 50)"
@@ -25,15 +27,21 @@ console = Console()
     help="Filter by log level",
 )
 def logs_command(
-    task_id: Optional[str], follow: bool, lines: int, level: Optional[str]
+    task_id_or_number: Optional[str], follow: bool, lines: int, level: Optional[str]
 ) -> None:
     """View task execution logs.
 
     Shows detailed logs for a specific task or recent system activity.
     Logs include task execution steps, errors, and system events.
 
+    You can specify the task by:
+    - Numeric ID (e.g., "4" or "#4")
+    - Full task ID (e.g., "fix-login-bug-a1b2c3")
+    - Partial task ID (e.g., "fix-login")
+
     Examples:
         fsd logs                    # Show recent system logs
+        fsd logs 4                  # Show logs for task #4
         fsd logs my-task           # Show logs for specific task
         fsd logs my-task --follow  # Follow task logs in real-time
         fsd logs --level ERROR     # Show only error logs
@@ -46,7 +54,15 @@ def logs_command(
             console.print("Run 'fsd init' to initialize FSD in this project")
             return
 
-        if task_id:
+        if task_id_or_number:
+            # Resolve task ID (supports numeric IDs, partial IDs, and full IDs)
+            task_id = resolve_task_id(task_id_or_number, fsd_dir)
+            if not task_id:
+                raise click.ClickException(
+                    f"Task '{task_id_or_number}' not found. "
+                    "Use 'fsd task list' to see available tasks."
+                )
+
             if follow:
                 _follow_task_logs(fsd_dir, task_id, level)
             else:
@@ -66,7 +82,7 @@ def _show_task_logs(
 ) -> None:
     """Show logs for a specific task."""
     logs_dir = fsd_dir / "logs"
-    task_log_file = logs_dir / f"{task_id}.log"
+    task_log_file = logs_dir / f"{task_id}.jsonl"
 
     if not task_log_file.exists():
         console.print(f"[yellow]No logs found for task '{task_id}'[/yellow]")
@@ -99,7 +115,7 @@ def _show_system_logs(fsd_dir: Path, lines: int, level: Optional[str]) -> None:
     # Collect logs from all task files
     all_entries = []
 
-    for log_file in logs_dir.glob("*.log"):
+    for log_file in logs_dir.glob("*.jsonl"):
         try:
             entries = _read_log_file(log_file, None, level)
             all_entries.extend(entries)
@@ -120,7 +136,7 @@ def _show_system_logs(fsd_dir: Path, lines: int, level: Optional[str]) -> None:
 def _follow_task_logs(fsd_dir: Path, task_id: str, level: Optional[str]) -> None:
     """Follow task logs in real-time."""
     logs_dir = fsd_dir / "logs"
-    task_log_file = logs_dir / f"{task_id}.log"
+    task_log_file = logs_dir / f"{task_id}.jsonl"
 
     console.print(f"[dim]Following logs for task: {task_id}[/dim]")
     console.print("[dim]Press Ctrl+C to stop[/dim]\n")

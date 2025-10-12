@@ -10,6 +10,8 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 
+from fsd.core.task_schema import load_task_from_yaml
+
 console = Console()
 
 
@@ -121,6 +123,7 @@ def _gather_all_tasks(fsd_dir: Path) -> List[Dict[str, Any]]:
                     "retry_count": state_data.get("retry_count", 0),
                     "error": state_data.get("error_message"),
                     "state_transitions": len(state_data.get("history", [])),
+                    "numeric_id": None,
                     "source": "state",
                 }
             except Exception as e:
@@ -150,23 +153,41 @@ def _gather_all_tasks(fsd_dir: Path) -> List[Dict[str, Any]]:
             except Exception:
                 pass
 
-    # 3. Check which tasks are still in queue
+    # 3. Check which tasks are still in queue and load numeric IDs
     queue_dir = fsd_dir / "queue"
     if queue_dir.exists():
         for queue_file in queue_dir.glob("*.yaml"):
             task_id = queue_file.stem
-            if task_id in tasks:
-                tasks[task_id]["in_queue"] = True
-            else:
-                # Task in queue but no state yet
-                tasks[task_id] = {
-                    "task_id": task_id,
-                    "status": "queued",
-                    "created_at": datetime.fromtimestamp(queue_file.stat().st_ctime).isoformat(),
-                    "updated_at": "",
-                    "in_queue": True,
-                    "source": "queue",
-                }
+            try:
+                task_def = load_task_from_yaml(queue_file)
+                if task_id in tasks:
+                    tasks[task_id]["in_queue"] = True
+                    tasks[task_id]["numeric_id"] = task_def.numeric_id
+                else:
+                    # Task in queue but no state yet
+                    tasks[task_id] = {
+                        "task_id": task_id,
+                        "status": "queued",
+                        "created_at": datetime.fromtimestamp(queue_file.stat().st_ctime).isoformat(),
+                        "updated_at": "",
+                        "numeric_id": task_def.numeric_id,
+                        "in_queue": True,
+                        "source": "queue",
+                    }
+            except Exception:
+                # If we can't load the YAML, just mark as in queue without numeric_id
+                if task_id in tasks:
+                    tasks[task_id]["in_queue"] = True
+                else:
+                    tasks[task_id] = {
+                        "task_id": task_id,
+                        "status": "queued",
+                        "created_at": datetime.fromtimestamp(queue_file.stat().st_ctime).isoformat(),
+                        "updated_at": "",
+                        "numeric_id": None,
+                        "in_queue": True,
+                        "source": "queue",
+                    }
 
     # 4. Check for logs and checkpoints to enrich data
     logs_dir = fsd_dir / "logs"
@@ -249,6 +270,7 @@ def _display_summary(tasks: List[Dict[str, Any]], status_filter: str) -> None:
 def _display_task_table(tasks: List[Dict[str, Any]]) -> None:
     """Display tasks in a table."""
     table = Table(title="Task History")
+    table.add_column("#", style="dim cyan", no_wrap=True)
     table.add_column("Task ID", style="cyan", no_wrap=True)
     table.add_column("Status", style="yellow")
     table.add_column("Created", style="dim")
@@ -259,6 +281,11 @@ def _display_task_table(tasks: List[Dict[str, Any]]) -> None:
 
     for task in tasks:
         task_id = task.get("task_id", "")
+
+        # Numeric ID
+        numeric_id = task.get("numeric_id")
+        numeric_display = str(numeric_id) if numeric_id else "-"
+
         status = task.get("status", "unknown")
 
         # Color code status
@@ -311,6 +338,7 @@ def _display_task_table(tasks: List[Dict[str, Any]]) -> None:
         location = "queue" if in_queue else "archive"
 
         table.add_row(
+            numeric_display,
             task_id,
             status_display,
             created_display,
