@@ -98,14 +98,19 @@ def handle_queue() -> list[str]:
     console.print("  [cyan]3[/cyan] - Stop execution")
     console.print("  [cyan]4[/cyan] - Clear queue")
     console.print("  [cyan]5[/cyan] - Retry task")
+    console.print("  [cyan]0[/cyan] - Back to main menu")
 
     choice = click.prompt(
         "Your choice",
-        type=click.Choice(["1", "2", "3", "4", "5"]),
+        type=click.Choice(["0", "1", "2", "3", "4", "5"]),
         default="1",
     )
 
-    if choice == "1":
+    if choice == "0":
+        # User wants to go back to main menu
+        console.print("[dim]Returning to main menu...[/dim]")
+        return []
+    elif choice == "1":
         return ["queue", "list"]
     elif choice == "2":
         return ["queue", "start"]

@@ -1,16 +1,12 @@
 """Tests for FSD interactive mode."""
 
-import subprocess
-from pathlib import Path
-from unittest.mock import Mock, patch, call
-
-import pytest
+from unittest.mock import Mock, patch
 
 from fsd.cli.interactive import (
-    run_interactive_mode,
+    _command_requires_args,
     _parse_command_input,
     _show_command_help,
-    _command_requires_args,
+    run_interactive_mode,
     show_menu,
 )
 
@@ -384,3 +380,107 @@ class TestShowMenu:
         # Check that the tip is in the output
         output = " ".join(str(call_args) for call_args in mock_print.call_args_list)
         assert "--help" in output
+
+
+class TestHandleQueue:
+    """Test queue handler functionality."""
+
+    @patch("fsd.cli.interactive.console.print")
+    @patch("fsd.cli.interactive.click.prompt")
+    def test_queue_back_option(self, mock_prompt, mock_print):
+        """Test that selecting '0' in queue menu returns empty list (go back)."""
+        from fsd.cli.interactive import handle_queue
+
+        # User selects option '0' (Back)
+        mock_prompt.return_value = "0"
+
+        result = handle_queue()
+
+        # Should return empty list to indicate going back to main menu
+        assert result == []
+
+        # Should print message about returning to main menu
+        assert any(
+            "Returning to main menu" in str(call_args)
+            for call_args in mock_print.call_args_list
+        )
+
+    @patch("fsd.cli.interactive.console.print")
+    @patch("fsd.cli.interactive.click.prompt")
+    def test_queue_list_option(self, mock_prompt, mock_print):
+        """Test that selecting '1' in queue menu returns queue list command."""
+        from fsd.cli.interactive import handle_queue
+
+        # User selects option '1' (List tasks)
+        mock_prompt.return_value = "1"
+
+        result = handle_queue()
+
+        # Should return command to list tasks
+        assert result == ["queue", "list"]
+
+    @patch("fsd.cli.interactive.console.print")
+    @patch("fsd.cli.interactive.click.prompt")
+    def test_queue_start_option(self, mock_prompt, mock_print):
+        """Test that selecting '2' in queue menu returns queue start command."""
+        from fsd.cli.interactive import handle_queue
+
+        # User selects option '2' (Start execution)
+        mock_prompt.return_value = "2"
+
+        result = handle_queue()
+
+        # Should return command to start queue
+        assert result == ["queue", "start"]
+
+    @patch("fsd.cli.interactive.console.print")
+    @patch("fsd.cli.interactive.click.prompt")
+    @patch("fsd.cli.interactive.click.confirm")
+    def test_queue_clear_confirmed(self, mock_confirm, mock_prompt, mock_print):
+        """Test that selecting '4' and confirming clears the queue."""
+        from fsd.cli.interactive import handle_queue
+
+        # User selects option '4' (Clear queue) and confirms
+        mock_prompt.return_value = "4"
+        mock_confirm.return_value = True
+
+        result = handle_queue()
+
+        # Should return command to clear queue
+        assert result == ["queue", "clear"]
+
+    @patch("fsd.cli.interactive.console.print")
+    @patch("fsd.cli.interactive.click.prompt")
+    @patch("fsd.cli.interactive.click.confirm")
+    def test_queue_clear_cancelled(self, mock_confirm, mock_prompt, mock_print):
+        """Test that cancelling clear returns to menu."""
+        from fsd.cli.interactive import handle_queue
+
+        # User selects option '4' (Clear queue) but cancels
+        mock_prompt.return_value = "4"
+        mock_confirm.return_value = False
+
+        result = handle_queue()
+
+        # Should return empty list
+        assert result == []
+
+        # Should print cancellation message
+        assert any(
+            "cancelled" in str(call_args).lower()
+            for call_args in mock_print.call_args_list
+        )
+
+    @patch("fsd.cli.interactive.console.print")
+    @patch("fsd.cli.interactive.click.prompt")
+    def test_queue_retry_option(self, mock_prompt, mock_print):
+        """Test that selecting '5' prompts for task ID and returns retry command."""
+        from fsd.cli.interactive import handle_queue
+
+        # Mock two prompts: first for menu choice, second for task ID
+        mock_prompt.side_effect = ["5", "task-123"]
+
+        result = handle_queue()
+
+        # Should return command to retry task
+        assert result == ["queue", "retry", "task-123"]
