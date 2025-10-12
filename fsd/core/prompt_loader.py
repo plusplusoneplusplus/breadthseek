@@ -60,6 +60,13 @@ class PromptTemplate(BaseModel):
         # Handle optional sections (sections that should be removed if variables are missing)
         rendered = self.content
 
+        # Auto-generate success_criteria_checklist from success_criteria if not provided
+        if "success_criteria" in variables and variables["success_criteria"]:
+            if "success_criteria_checklist" not in variables:
+                all_vars["success_criteria_checklist"] = self._format_section(
+                    "success_criteria_checklist", variables["success_criteria"]
+                )
+
         # Process optional sections like {context_section}, {focus_files_section}
         # These are conditional blocks that should be included only if the variable exists
         for opt_var in self.optional_variables:
@@ -224,6 +231,7 @@ class PromptLoader:
                 "context",
                 "focus_files",
                 "success_criteria",
+                "success_criteria_checklist",
                 "previous_steps_section",
                 "execution_summary",
                 "validation_failure_summary",
