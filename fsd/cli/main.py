@@ -17,6 +17,7 @@ from fsd.cli.commands.status import status_command
 from fsd.cli.commands.logs import logs_command
 from fsd.cli.commands.serve import serve_command
 from fsd.cli.interactive import run_interactive_mode
+from fsd.cli.shell import run_shell_mode
 from fsd.core.exceptions import FSDError
 
 console = Console()
@@ -30,8 +31,13 @@ console = Console()
     type=click.Path(exists=True, path_type=Path),
     help="Path to configuration file",
 )
+@click.option(
+    "--simple-mode",
+    is_flag=True,
+    help="Use simple interactive mode (no history/completion)",
+)
 @click.pass_context
-def cli(ctx: click.Context, verbose: bool, config: Optional[Path]) -> None:
+def cli(ctx: click.Context, verbose: bool, config: Optional[Path], simple_mode: bool) -> None:
     """FSD: Autonomous Overnight Coding Agent System.
 
     A Feature-Sliced Design system that enables a CLI-based coding agent to work
@@ -68,7 +74,12 @@ def cli(ctx: click.Context, verbose: bool, config: Optional[Path]) -> None:
             os.environ["FSD_INTERACTIVE_MODE"] = "1"
 
             # Run in continuous mode - loops until user quits
-            run_interactive_mode(continuous=True, verbose=verbose, config=config)
+            if simple_mode:
+                # Use simple interactive mode (old behavior)
+                run_interactive_mode(continuous=True, verbose=verbose, config=config)
+            else:
+                # Use new shell mode with history, completion, etc. (default)
+                run_shell_mode(continuous=True, verbose=verbose, config=config)
 
             # Clean up and exit
             sys.exit(0)
