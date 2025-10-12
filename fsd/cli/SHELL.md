@@ -35,7 +35,7 @@ The FSD CLI includes a powerful interactive shell with bash-like features for po
 | Command | Description |
 |---------|-------------|
 | `help` | Show FSD command menu |
-| `?` | Show shell features help |
+| `?` | Show FSD command menu |
 | `clear` | Clear the terminal screen |
 | `history` | Show recent command history (last 20) |
 | `quit` / `exit` | Exit the shell |
@@ -61,7 +61,7 @@ $ fsd
 │ Interactive Mode                                │
 ╰─────────────────────────────────────────────────╯
 
-Type 'help' for available commands, '?' for shell features
+Type 'help' or '?' for available commands
 
 History: /path/to/project/.fsd/shell_history
 

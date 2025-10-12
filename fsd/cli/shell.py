@@ -153,7 +153,12 @@ def create_prompt_session() -> PromptSession:
 
 
 def show_shell_help():
-    """Display help for shell features."""
+    """Display help for shell features and built-in commands.
+
+    This function shows information about shell keyboard shortcuts and
+    built-in commands. Note that both 'help' and '?' display the FSD
+    command menu (show_menu()), not this shell help.
+    """
     console.print("\n[bold cyan]Shell Features:[/bold cyan]")
     console.print("  [dim]↑↓[/dim]         Navigate command history")
     console.print("  [dim]Tab[/dim]        Auto-complete commands and options")
@@ -267,6 +272,7 @@ def run_shell_mode(continuous: bool = True, verbose: bool = False, config: Optio
                 console.print("[yellow]Goodbye![/yellow]")
                 return None
 
+            # Both '?' and 'help' show the FSD command menu
             if choice == "?":
                 show_menu()
                 continue
