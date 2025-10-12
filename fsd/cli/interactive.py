@@ -1,5 +1,7 @@
 """Interactive mode for FSD CLI."""
 
+import subprocess
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -163,12 +165,21 @@ def handle_serve() -> list[str]:
     return cmd_args
 
 
-def run_interactive_mode() -> Optional[list[str]]:
+def run_interactive_mode(
+    continuous: bool = False, verbose: bool = False, config: Optional[Path] = None
+) -> Optional[list[str]]:
     """
     Run the interactive mode and return the command args to execute.
 
+    Args:
+        continuous: If True, loop continuously executing commands until quit.
+                   If False, return after first valid command selection.
+        verbose: Pass verbose flag to executed commands.
+        config: Pass config path to executed commands.
+
     Returns:
-        List of command arguments to execute, or None if user quits.
+        List of command arguments to execute (when continuous=False),
+        or None if user quits.
     """
     show_welcome()
 
@@ -193,10 +204,44 @@ def run_interactive_mode() -> Optional[list[str]]:
         handler = handlers.get(choice)
         if handler:
             cmd_args = handler()
-            if cmd_args:  # Only return if we have valid command args
-                return cmd_args
+            if cmd_args:  # Only proceed if we have valid command args
+                if continuous:
+                    # Execute the command and loop back to menu
+                    _execute_command(cmd_args, verbose, config)
+                    console.print("\n[dim]Press Enter to continue...[/dim]")
+                    input()
+                else:
+                    # Return command args for external execution
+                    return cmd_args
             # If empty list returned (e.g., cancelled operation), show menu again
         else:
             console.print(f"[red]Invalid option: {choice}[/red]")
             console.print("[dim]Press Enter to continue...[/dim]")
             input()
+
+
+def _execute_command(cmd_args: list[str], verbose: bool, config: Optional[Path]) -> None:
+    """
+    Execute a command with the given arguments.
+
+    Args:
+        cmd_args: Command arguments to execute.
+        verbose: Whether to enable verbose output.
+        config: Optional config file path.
+    """
+    cmd = ["fsd"] + cmd_args
+    if verbose:
+        cmd.append("--verbose")
+    if config:
+        cmd.extend(["--config", str(config)])
+
+    console.print(f"\n[dim]Executing: {' '.join(cmd)}[/dim]\n")
+
+    try:
+        result = subprocess.run(cmd)
+        if result.returncode != 0:
+            console.print(f"\n[yellow]Command exited with code {result.returncode}[/yellow]")
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Command interrupted[/yellow]")
+    except Exception as e:
+        console.print(f"\n[red]Error executing command: {e}[/red]")

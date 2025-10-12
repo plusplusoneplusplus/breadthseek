@@ -62,22 +62,16 @@ def cli(ctx: click.Context, verbose: bool, config: Optional[Path]) -> None:
 
     # If no subcommand was provided, enter interactive mode
     if ctx.invoked_subcommand is None:
-        # Check if we're already in a re-invocation
+        # Check if we're already in a re-invocation (for nested command execution)
         if not os.environ.get("FSD_INTERACTIVE_MODE"):
-            cmd_args = run_interactive_mode()
-            if cmd_args:
-                # Re-invoke fsd with the selected command
-                env = os.environ.copy()
-                env["FSD_INTERACTIVE_MODE"] = "1"  # Prevent infinite loop
+            # Set environment variable to prevent nested interactive modes
+            os.environ["FSD_INTERACTIVE_MODE"] = "1"
 
-                cmd = ["fsd"] + cmd_args
-                if verbose:
-                    cmd.append("--verbose")
-                if config:
-                    cmd.extend(["--config", str(config)])
+            # Run in continuous mode - loops until user quits
+            run_interactive_mode(continuous=True, verbose=verbose, config=config)
 
-                result = subprocess.run(cmd, env=env)
-                sys.exit(result.returncode)
+            # Clean up and exit
+            sys.exit(0)
 
 
 # Add command groups and commands

@@ -10,11 +10,15 @@ Simply run:
 fsd
 ```
 
-This will launch an interactive menu that guides you through:
+This will launch an interactive menu that operates in a continuous loop:
 
 1. **Choosing a command** - Select from available commands (init, submit, queue, status, logs, serve)
 2. **Providing parameters** - The CLI will prompt for required parameters based on your selection
 3. **Executing the command** - The selected command runs with your provided parameters
+4. **Return to menu** - After command completion, press Enter to return to the menu for the next task
+5. **Repeat** - Continue executing commands until you're ready to quit
+
+The interactive mode runs continuously, allowing you to execute multiple commands in sequence without re-launching the CLI.
 
 ## Features
 
@@ -52,6 +56,14 @@ Enter your task description. Can include priority and time estimate.
 Example: HIGH priority: Fix login bug. Takes 30m
 
 Task description: Add user authentication feature
+
+Executing: fsd submit --text "Add user authentication feature"
+
+[... command output ...]
+
+Press Enter to continue...
+
+[Returns to menu for next command]
 ```
 
 ## Command-Specific Prompts
@@ -85,3 +97,5 @@ Task description: Add user authentication feature
 - **Faster onboarding** - New users can explore features easily
 - **Reduced errors** - Guided input with validation
 - **Flexible workflow** - Switch between interactive and direct command modes
+- **Continuous operation** - Execute multiple commands without restarting the CLI
+- **Efficient task management** - Check status, submit tasks, and view logs in a single session
