@@ -240,7 +240,7 @@ def run_shell_mode(continuous: bool = True, verbose: bool = False, config: Optio
 
     # Show welcome banner
     show_welcome()
-    console.print("[dim]Type 'help' for available commands, '?' for shell features[/dim]\n")
+    console.print("[dim]Type 'help' or '?' for available commands[/dim]\n")
 
     # Create prompt session
     session = create_prompt_session()
@@ -268,7 +268,7 @@ def run_shell_mode(continuous: bool = True, verbose: bool = False, config: Optio
                 return None
 
             if choice == "?":
-                show_shell_help()
+                show_menu()
                 continue
 
             if choice == "help":
