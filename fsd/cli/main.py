@@ -16,7 +16,7 @@ from fsd.cli.commands.queue import queue_group
 from fsd.cli.commands.status import status_command
 from fsd.cli.commands.logs import logs_command
 from fsd.cli.commands.serve import serve_command
-from fsd.cli.commands.task import task_command
+from fsd.cli.commands.task import task_group
 from fsd.cli.commands.history import history_command
 from fsd.cli.interactive import run_interactive_mode
 from fsd.cli.shell import run_shell_mode
@@ -91,7 +91,7 @@ def cli(ctx: click.Context, verbose: bool, config: Optional[Path], simple_mode: 
 cli.add_command(init_command, name="init")
 cli.add_command(submit_command, name="submit")
 cli.add_command(queue_group, name="queue")
-cli.add_command(task_command, name="task")
+cli.add_command(task_group, name="task")
 cli.add_command(history_command, name="history")
 cli.add_command(status_command, name="status")
 cli.add_command(logs_command, name="logs")

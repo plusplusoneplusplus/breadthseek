@@ -33,7 +33,10 @@ FSD_COMMANDS = {
         "retry": ["--all-failed", "--help"],
         "show": ["--checkpoints", "-c", "--logs", "-l", "--help"],
     },
-    "task": ["--checkpoints", "-c", "--logs", "-l", "--help"],
+    "task": {
+        "show": ["--checkpoints", "-c", "--logs", "-l", "--help"],
+        "list": ["--status", "-s", "--priority", "-p", "--location", "--limit", "-n", "--all", "-a", "--sort", "--reverse", "-r", "--help"],
+    },
     "history": ["--status", "-s", "--limit", "-n", "--all", "-a", "--help"],
     "status": ["--watch", "-w", "--help"],
     "logs": ["--follow", "-f", "--tail", "-n", "--help"],

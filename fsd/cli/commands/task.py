@@ -1,8 +1,9 @@
-"""FSD task commands - for viewing any task (past or present)."""
+"""FSD task commands - for viewing and listing tasks (past or present)."""
 
 import json
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 import click
 from rich.console import Console
@@ -15,11 +16,23 @@ from fsd.core.checkpoint_manager import CheckpointManager
 console = Console()
 
 
-@click.command()
+@click.group(invoke_without_command=True)
+@click.pass_context
+def task_group(ctx: click.Context) -> None:
+    """View and manage tasks (past or present).
+
+    Commands for showing task details and listing all tasks with filtering.
+    """
+    # If no subcommand was provided, show help
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@task_group.command("show")
 @click.argument("task_id")
 @click.option("--checkpoints", "-c", is_flag=True, help="Show checkpoint history")
 @click.option("--logs", "-l", is_flag=True, help="Show execution logs summary")
-def task_command(task_id: str, checkpoints: bool, logs: bool) -> None:
+def show_command(task_id: str, checkpoints: bool, logs: bool) -> None:
     """Show detailed information about any task (past or present).
 
     This command works for tasks in the queue, completed tasks, and cleared tasks.
@@ -348,3 +361,422 @@ def _display_logs_summary(task_id: str, fsd_dir: Path) -> None:
 
     except Exception as e:
         console.print(f"\n[yellow]Could not load logs: {e}[/yellow]")
+
+
+@task_group.command("list")
+@click.option(
+    "--status",
+    "-s",
+    type=click.Choice(["all", "queued", "planning", "executing", "validating", "completed", "failed"]),
+    default="all",
+    help="Filter by status",
+)
+@click.option(
+    "--priority",
+    "-p",
+    type=click.Choice(["all", "low", "medium", "high", "critical"]),
+    default="all",
+    help="Filter by priority",
+)
+@click.option(
+    "--location",
+    type=click.Choice(["all", "queue", "archive"]),
+    default="all",
+    help="Filter by location (queue=active, archive=cleared)",
+)
+@click.option(
+    "--limit",
+    "-n",
+    type=int,
+    default=50,
+    help="Maximum number of tasks to show (default: 50)",
+)
+@click.option(
+    "--all",
+    "-a",
+    "show_all",
+    is_flag=True,
+    help="Show all tasks (no limit)",
+)
+@click.option(
+    "--sort",
+    type=click.Choice(["created", "updated", "status", "priority"]),
+    default="created",
+    help="Sort by field (default: created)",
+)
+@click.option(
+    "--reverse",
+    "-r",
+    is_flag=True,
+    help="Reverse sort order",
+)
+def list_command(
+    status: str,
+    priority: str,
+    location: str,
+    limit: int,
+    show_all: bool,
+    sort: str,
+    reverse: bool,
+) -> None:
+    """List all tasks with filtering and pagination.
+
+    Shows tasks from queue and historical archives with comprehensive filtering options.
+
+    Examples:
+        fsd task list                      # Recent 50 tasks
+        fsd task list --all                # All tasks
+        fsd task list -s failed            # Only failed tasks
+        fsd task list -p high              # Only high priority
+        fsd task list --location queue     # Only active tasks
+        fsd task list --sort status        # Sort by status
+        fsd task list -n 10 --reverse      # Last 10, oldest first
+    """
+    try:
+        fsd_dir = Path.cwd() / ".fsd"
+        if not fsd_dir.exists():
+            raise click.ClickException("FSD not initialized. Run 'fsd init' first.")
+
+        # Gather all tasks
+        tasks = _gather_all_tasks(fsd_dir)
+
+        if not tasks:
+            console.print("[yellow]No tasks found[/yellow]")
+            console.print("Submit tasks with 'fsd submit' to get started")
+            return
+
+        # Apply filters
+        original_count = len(tasks)
+        tasks = _apply_filters(tasks, status, priority, location)
+
+        if not tasks:
+            console.print(f"[yellow]No tasks match the filters[/yellow]")
+            return
+
+        # Sort tasks
+        tasks = _sort_tasks(tasks, sort, reverse)
+
+        # Apply limit
+        if not show_all and len(tasks) > limit:
+            tasks_to_show = tasks[:limit]
+            remaining = len(tasks) - limit
+        else:
+            tasks_to_show = tasks
+            remaining = 0
+
+        # Show summary
+        _display_list_summary(tasks, original_count, status, priority, location)
+
+        # Show task table
+        _display_task_list_table(tasks_to_show)
+
+        # Show pagination info
+        if remaining > 0:
+            console.print(f"\n[dim]Showing {limit} of {len(tasks)} filtered tasks (of {original_count} total).[/dim]")
+            console.print(f"[dim]Use --all or -n {len(tasks)} to see all filtered tasks.[/dim]")
+        elif len(tasks) < original_count:
+            console.print(f"\n[dim]Showing {len(tasks)} filtered tasks (of {original_count} total).[/dim]")
+
+    except Exception as e:
+        console.print(f"[red]Failed to list tasks:[/red] {e}")
+        raise click.ClickException(f"Failed to list tasks: {e}")
+
+
+def _gather_all_tasks(fsd_dir: Path) -> List[Dict[str, Any]]:
+    """Gather all task information from all sources.
+
+    Returns:
+        List of task dictionaries with all available information
+    """
+    tasks = {}
+
+    # 1. Get tasks from state directory
+    state_dir = fsd_dir / "state"
+    if state_dir.exists():
+        for state_file in state_dir.glob("*.json"):
+            task_id = state_file.stem
+            try:
+                with open(state_file, "r", encoding="utf-8") as f:
+                    state_data = json.load(f)
+
+                tasks[task_id] = {
+                    "task_id": task_id,
+                    "status": state_data.get("current_state", "unknown"),
+                    "created_at": state_data.get("created_at", ""),
+                    "updated_at": state_data.get("updated_at", ""),
+                    "retry_count": state_data.get("retry_count", 0),
+                    "error": state_data.get("error_message"),
+                    "priority": None,
+                    "numeric_id": None,
+                }
+            except Exception:
+                pass
+
+    # 2. Get tasks from queue (supplement with task definitions)
+    queue_dir = fsd_dir / "queue"
+    if queue_dir.exists():
+        for queue_file in queue_dir.glob("*.yaml"):
+            task_id = queue_file.stem
+            try:
+                task_def = load_task_from_yaml(queue_file)
+
+                if task_id in tasks:
+                    # Enhance existing entry
+                    tasks[task_id]["in_queue"] = True
+                    tasks[task_id]["priority"] = task_def.priority.value
+                    tasks[task_id]["numeric_id"] = task_def.numeric_id
+                else:
+                    # New entry from queue
+                    tasks[task_id] = {
+                        "task_id": task_id,
+                        "status": "queued",
+                        "created_at": datetime.fromtimestamp(queue_file.stat().st_ctime).isoformat(),
+                        "updated_at": "",
+                        "in_queue": True,
+                        "priority": task_def.priority.value,
+                        "numeric_id": task_def.numeric_id,
+                    }
+            except Exception:
+                pass
+
+    # 3. Check for logs and checkpoints
+    logs_dir = fsd_dir / "logs"
+    checkpoints_dir = fsd_dir / "checkpoints"
+
+    for task_id in tasks:
+        # Check for logs
+        log_file = logs_dir / f"{task_id}.jsonl"
+        if log_file.exists():
+            tasks[task_id]["has_logs"] = True
+            tasks[task_id]["log_size"] = log_file.stat().st_size
+        else:
+            tasks[task_id]["has_logs"] = False
+
+        # Check for checkpoints
+        checkpoint_dir = checkpoints_dir / task_id
+        if checkpoint_dir.exists():
+            checkpoint_count = len(list(checkpoint_dir.glob("*.json")))
+            tasks[task_id]["checkpoint_count"] = checkpoint_count
+        else:
+            tasks[task_id]["checkpoint_count"] = 0
+
+        # Mark location
+        tasks[task_id]["location"] = "queue" if tasks[task_id].get("in_queue") else "archive"
+
+    return list(tasks.values())
+
+
+def _apply_filters(
+    tasks: List[Dict[str, Any]],
+    status: str,
+    priority: str,
+    location: str,
+) -> List[Dict[str, Any]]:
+    """Apply filters to task list."""
+    filtered = tasks
+
+    # Filter by status
+    if status != "all":
+        filtered = [t for t in filtered if t.get("status") == status]
+
+    # Filter by priority
+    if priority != "all":
+        filtered = [t for t in filtered if t.get("priority") == priority]
+
+    # Filter by location
+    if location != "all":
+        filtered = [t for t in filtered if t.get("location") == location]
+
+    return filtered
+
+
+def _sort_tasks(
+    tasks: List[Dict[str, Any]],
+    sort_by: str,
+    reverse: bool,
+) -> List[Dict[str, Any]]:
+    """Sort tasks by specified field."""
+    # Sort key functions
+    def get_sort_key(task: Dict[str, Any]) -> Any:
+        if sort_by == "created":
+            return task.get("created_at", "")
+        elif sort_by == "updated":
+            return task.get("updated_at", "")
+        elif sort_by == "status":
+            # Order: queued, planning, executing, validating, completed, failed
+            status_order = {"queued": 0, "planning": 1, "executing": 2, "validating": 3, "completed": 4, "failed": 5}
+            return status_order.get(task.get("status", "unknown"), 99)
+        elif sort_by == "priority":
+            # Order: critical, high, medium, low
+            priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+            return priority_order.get(task.get("priority", "medium"), 99)
+        else:
+            return ""
+
+    # Default sort is newest first for created/updated
+    default_reverse = sort_by in ["created", "updated"]
+
+    # If user specified reverse, flip it
+    if reverse:
+        sort_reverse = not default_reverse
+    else:
+        sort_reverse = default_reverse
+
+    return sorted(tasks, key=get_sort_key, reverse=sort_reverse)
+
+
+def _display_list_summary(
+    tasks: List[Dict[str, Any]],
+    original_count: int,
+    status_filter: str,
+    priority_filter: str,
+    location_filter: str,
+) -> None:
+    """Display summary for task list."""
+    summary = []
+
+    # Show filtering info if any filters applied
+    filters_applied = []
+    if status_filter != "all":
+        filters_applied.append(f"status={status_filter}")
+    if priority_filter != "all":
+        filters_applied.append(f"priority={priority_filter}")
+    if location_filter != "all":
+        filters_applied.append(f"location={location_filter}")
+
+    if filters_applied:
+        filter_str = ", ".join(filters_applied)
+        summary.append(f"[bold]Filters:[/bold] {filter_str}")
+        summary.append(f"[bold]Matching Tasks:[/bold] {len(tasks)} of {original_count}")
+    else:
+        summary.append(f"[bold]Total Tasks:[/bold] {len(tasks)}")
+
+    # Count by status (of filtered tasks)
+    if status_filter == "all":
+        by_status = {}
+        for task in tasks:
+            task_status = task.get("status", "unknown")
+            by_status[task_status] = by_status.get(task_status, 0) + 1
+
+        if by_status:
+            summary.append("")
+            summary.append("[bold]By Status:[/bold]")
+            status_order = ["queued", "planning", "executing", "validating", "completed", "failed"]
+            for status in status_order:
+                if status in by_status:
+                    count = by_status[status]
+                    status_colors = {
+                        "queued": "blue",
+                        "planning": "cyan",
+                        "executing": "yellow",
+                        "validating": "magenta",
+                        "completed": "green",
+                        "failed": "red",
+                    }
+                    color = status_colors.get(status, "white")
+                    summary.append(f"  [{color}]{status}[/{color}]: {count}")
+
+    panel = Panel(
+        "\n".join(summary),
+        title="[bold cyan]Task List Summary[/bold cyan]",
+        border_style="cyan",
+    )
+    console.print(panel)
+    console.print()
+
+
+def _display_task_list_table(tasks: List[Dict[str, Any]]) -> None:
+    """Display tasks in a compact table."""
+    table = Table(title="Tasks")
+    table.add_column("ID", style="cyan", no_wrap=True, max_width=30)
+    table.add_column("#", style="dim", no_wrap=True)
+    table.add_column("Status", style="yellow", no_wrap=True)
+    table.add_column("Priority", style="magenta", no_wrap=True)
+    table.add_column("Created", style="dim", no_wrap=True)
+    table.add_column("CP", style="blue", no_wrap=True)  # Checkpoints
+    table.add_column("Logs", style="green", no_wrap=True)
+    table.add_column("Loc", style="dim", no_wrap=True)
+
+    for task in tasks:
+        task_id = task.get("task_id", "")
+
+        # Truncate long task IDs
+        if len(task_id) > 28:
+            task_id_display = task_id[:25] + "..."
+        else:
+            task_id_display = task_id
+
+        # Numeric ID
+        numeric_id = task.get("numeric_id")
+        numeric_display = str(numeric_id) if numeric_id else "-"
+
+        # Status
+        status = task.get("status", "unknown")
+        status_colors = {
+            "queued": "[blue]queued[/blue]",
+            "planning": "[cyan]plan[/cyan]",
+            "executing": "[yellow]exec[/yellow]",
+            "validating": "[magenta]valid[/magenta]",
+            "completed": "[green]done[/green]",
+            "failed": "[red]failed[/red]",
+        }
+        status_display = status_colors.get(status, status[:6])
+
+        # Priority
+        priority = task.get("priority", "-")
+        if priority and priority != "-":
+            priority_colors = {
+                "critical": "[red bold]CRIT[/red bold]",
+                "high": "[red]HIGH[/red]",
+                "medium": "[yellow]MED[/yellow]",
+                "low": "[dim]LOW[/dim]",
+            }
+            priority_display = priority_colors.get(priority, priority[:4].upper())
+        else:
+            priority_display = "-"
+
+        # Created time
+        created = task.get("created_at", "")
+        if created:
+            try:
+                dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                created_display = dt.strftime("%m-%d %H:%M")
+            except Exception:
+                created_display = created[:14] if len(created) > 14 else created
+        else:
+            created_display = "-"
+
+        # Checkpoints
+        checkpoint_count = task.get("checkpoint_count", 0)
+        checkpoint_display = str(checkpoint_count) if checkpoint_count > 0 else "-"
+
+        # Logs
+        has_logs = task.get("has_logs", False)
+        log_size = task.get("log_size", 0)
+        if has_logs and log_size > 0:
+            log_kb = log_size / 1024
+            if log_kb < 1:
+                logs_display = f"{log_size}B"
+            elif log_kb < 100:
+                logs_display = f"{log_kb:.0f}K"
+            else:
+                logs_display = f"{log_kb/1024:.1f}M"
+        else:
+            logs_display = "-"
+
+        # Location
+        location = task.get("location", "archive")
+        location_display = "Q" if location == "queue" else "A"
+
+        table.add_row(
+            task_id_display,
+            numeric_display,
+            status_display,
+            priority_display,
+            created_display,
+            checkpoint_display,
+            logs_display,
+            location_display,
+        )
+
+    console.print(table)
