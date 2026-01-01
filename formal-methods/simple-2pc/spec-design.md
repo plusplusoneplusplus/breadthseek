@@ -238,24 +238,26 @@ When coordinator recovers (`coordPhase = idle` after crash):
 ### 1. Data Always Accessible
 
 ```tla
-DataAccessible == ∀ s ∈ Stores: storeKey[s] ∈ {"A", "A'"}
+DataAccessible == ∀ s ∈ Stores : storeKey[s] ∈ {"A", "A'"}
 ```
 
 Each store always has exactly one valid key — data is never in limbo.
 
-### 2. Value Preservation
+### 2. No Rename Without Commit
 
 ```tla
-ValuePreserved == ∀ s ∈ Stores:
-    storeValue'[s] ≠ storeValue[s] ⇒ lockA[s] = FALSE
+NoRenameWithoutCommit == ~walCommitted ⇒ ∀ s ∈ Stores : storeKey[s] = "A"
 ```
 
-Values only change via explicit `UpdateValue` (when unlocked), never corrupted during rename.
+If the coordinator has not committed, no store should have renamed. This holds because:
+- `RenameReq` is only sent when `coordPhase = committed`
+- `coordPhase = committed` requires `walCommitted = TRUE`
+- Therefore: no commit ⇒ no rename ever sent ⇒ all stores have `A`
 
 ### 3. Commit Consistency
 
 ```tla
-CommitConsistency == coordPhase = done ⇒ ∀ s ∈ Stores: storeKey[s] = "A'"
+CommitConsistency == coordPhase = "done" ⇒ ∀ s ∈ Stores : storeKey[s] = "A'"
 ```
 
 If coordinator believes rename is complete, all stores have `A'`.
@@ -263,11 +265,10 @@ If coordinator believes rename is complete, all stores have `A'`.
 ### 4. Lock Protects Updates
 
 ```tla
-LockProtectsUpdates == ∀ s ∈ Stores:
-    lockA[s] = TRUE ⇒ UNCHANGED storeValue[s]
+LockProtectsUpdates == ∀ s ∈ Stores : lockA[s] ⇒ storeValue[s] = storeValue[s]
 ```
 
-While locked, external updates cannot modify the value.
+While locked, external updates cannot modify the value. (Enforced by `UpdateValue` precondition; this invariant is trivially true but documents the intent.)
 
 ---
 

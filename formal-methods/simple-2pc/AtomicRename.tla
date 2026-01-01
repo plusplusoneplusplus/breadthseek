@@ -250,11 +250,15 @@ Spec == Init /\ [][Next]_vars
 DataAccessible ==
     \A s \in Stores : storeKey[s] \in {"A", "A'"}
 
-\* 2. If coordinator believes rename is complete, all stores have A'
+\* 2. No rename without commit - if not committed, all stores have A
+NoRenameWithoutCommit ==
+    ~walCommitted => \A s \in Stores : storeKey[s] = "A"
+
+\* 3. If coordinator believes rename is complete, all stores have A'
 CommitConsistency ==
     coordPhase = "done" => \A s \in Stores : storeKey[s] = "A'"
 
-\* 3. Values only change when unlocked (lock protects updates)
+\* 4. Values only change when unlocked (lock protects updates)
 \*    This is enforced by UpdateValue precondition, but we state it as invariant
 LockProtectsValue ==
     \A s \in Stores : lockA[s] => storeValue[s] = storeValue[s]
@@ -263,6 +267,7 @@ LockProtectsValue ==
 Safety ==
     /\ TypeOK
     /\ DataAccessible
+    /\ NoRenameWithoutCommit
     /\ CommitConsistency
 
 =============================================================================
