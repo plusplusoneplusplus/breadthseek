@@ -258,7 +258,15 @@ NoRenameWithoutCommit ==
 CommitConsistency ==
     coordPhase = "done" => \A s \in Stores : storeKey[s] = "A'"
 
-\* 4. Values only change when unlocked (lock protects updates)
+\* 4. If any store has renamed, WAL must be committed (contrapositive of NoRenameWithoutCommit)
+RenameImpliesCommit ==
+    \A s \in Stores : storeKey[s] = "A'" => walCommitted
+
+\* 5. Committed phase requires WAL commit
+CommittedImpliesWal ==
+    coordPhase = "committed" => walCommitted
+
+\* 6. Values only change when unlocked (lock protects updates)
 \*    This is enforced by UpdateValue precondition, but we state it as invariant
 LockProtectsValue ==
     \A s \in Stores : lockA[s] => storeValue[s] = storeValue[s]
@@ -269,5 +277,7 @@ Safety ==
     /\ DataAccessible
     /\ NoRenameWithoutCommit
     /\ CommitConsistency
+    /\ RenameImpliesCommit
+    /\ CommittedImpliesWal
 
 =============================================================================

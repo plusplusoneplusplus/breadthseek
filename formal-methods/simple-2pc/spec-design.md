@@ -262,7 +262,23 @@ CommitConsistency == coordPhase = "done" ⇒ ∀ s ∈ Stores : storeKey[s] = "A
 
 If coordinator believes rename is complete, all stores have `A'`.
 
-### 4. Lock Protects Updates
+### 4. Rename Implies Commit
+
+```tla
+RenameImpliesCommit == ∀ s ∈ Stores : storeKey[s] = "A'" ⇒ walCommitted
+```
+
+If any store has renamed to `A'`, then the coordinator must have committed. (Contrapositive of `NoRenameWithoutCommit`.)
+
+### 5. Committed Phase Implies WAL
+
+```tla
+CommittedImpliesWal == coordPhase = "committed" ⇒ walCommitted
+```
+
+The coordinator can only be in the `committed` phase if the WAL commit was recorded. This ensures the phase is consistent with durable state.
+
+### 6. Lock Protects Updates
 
 ```tla
 LockProtectsUpdates == ∀ s ∈ Stores : lockA[s] ⇒ storeValue[s] = storeValue[s]
