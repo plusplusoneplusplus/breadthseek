@@ -175,9 +175,10 @@ CoordinatorRecover ==
        THEN \* Committed - resume commit phase, resend RenameReq to all stores
             /\ coordPhase' = "committed"
             /\ messages' = messages \cup {RenameReqMsg(s) : s \in Stores}
-            /\ UNCHANGED <<walCommitted, locksAcquired, renamesDone, storeVars>>
+            /\ UNCHANGED <<walCommitted, locksAcquired, renamesDone, unlocksAcked, storeVars>>
        ELSE \* Not committed - send unlocks to cleanup, return to idle
-            /\ coordPhase' = "idle"
+            /\ coordPhase' = "cleanup"
+            /\ unlocksAcked' = {}  \* Reset unlock tracking
             /\ messages' = messages \cup {UnlockReqMsg(s) : s \in Stores}
             /\ UNCHANGED <<walCommitted, locksAcquired, renamesDone, storeVars>>
 
@@ -254,6 +255,7 @@ Next ==
     \/ \E s \in Stores : SendRenameReq(s)
     \/ \E s \in Stores : RecvRenameResp(s)
     \/ \E s \in Stores : SendUnlockReq(s)
+    \/ \E s \in Stores : RecvUnlockResp(s)
     \/ CoordinatorCrash
     \/ CoordinatorRecover
     \* KV Store actions
@@ -280,7 +282,7 @@ NoRenameWithoutCommit ==
 
 \* 3. If coordinator believes rename is complete, all stores have A'
 CommitConsistency ==
-    coordPhase = "done" => \A s \in Stores : storeKey[s] = "A'"
+    (coordPhase = "done" /\ walCommitted) => \A s \in Stores : storeKey[s] = "A'"
 
 \* 4. If any store has renamed, WAL must be committed (contrapositive of NoRenameWithoutCommit)
 RenameImpliesCommit ==
@@ -331,6 +333,7 @@ CoordinatorFairness ==
     /\ \A s \in Stores : WF_vars(SendRenameReq(s))
     /\ \A s \in Stores : SF_vars(RecvRenameResp(s))
     /\ \A s \in Stores : WF_vars(SendUnlockReq(s))
+    /\ \A s \in Stores : SF_vars(RecvUnlockResp(s))
     /\ WF_vars(CoordinatorRecover)
 
 \* Fairness on KV store handlers (SF because messages can be lost/re-sent)
