@@ -15,6 +15,7 @@ This specification models a 2PC-style protocol for atomically renaming a key (`A
 | **Value domain** | `{0, 1, 2}` — small finite set for tractable model checking |
 | **Lock timeout** | No timeout — locks persist until explicitly released |
 | **Lock both keys** | Always lock both `A` and `A'`; fail if `A'` already exists |
+| **Transaction ID** | Each protocol attempt has a unique `txnId`; stores reject old txnIds to prevent stale message interference after crash recovery |
 
 ---
 
@@ -33,13 +34,14 @@ This specification models a 2PC-style protocol for atomically renaming a key (`A
 
 | Variable | Type | Durable | Description |
 |----------|------|---------|-------------|
-| `coordPhase` | `{idle, preparing, committed, cleanup, done}` | No | Current phase of the protocol |
+| `currentTxnId` | `Nat` | **Yes** | Transaction ID for current protocol attempt (incremented on recovery) |
+| `coordPhase` | `{idle, preparing, committed, cleanup, done, crashed}` | No | Current phase of the protocol |
 | `walCommitted` | `BOOLEAN` | **Yes** | Whether COMMIT is recorded in WAL (survives crash) |
 | `locksAcquired` | `SUBSET Stores` | No | Stores that have responded success to `LockReq` |
 | `renamesDone` | `SUBSET Stores` | No | Stores that have responded to `RenameReq` |
 | `unlocksAcked` | `SUBSET Stores` | No | Stores that have responded to `UnlockReq` |
 
-> **Crash behavior**: On crash, `coordPhase` resets to `idle`, and `locksAcquired`/`renamesDone`/`unlocksAcked` reset to `{}`. Only `walCommitted` persists.
+> **Crash behavior**: On crash, `coordPhase` transitions to `crashed`, and `locksAcquired`/`renamesDone`/`unlocksAcked` reset to `{}`. Durable state (`currentTxnId`, `walCommitted`) persists.
 
 ### KV Store State (per store `s`)
 
@@ -49,6 +51,7 @@ This specification models a 2PC-style protocol for atomically renaming a key (`A
 | `storeValue[s]` | `{0, 1, 2}` | The current value |
 | `lockA[s]` | `BOOLEAN` | Whether key `A` is locked |
 | `lockAprime[s]` | `BOOLEAN` | Whether key `A'` is locked |
+| `lastSeenTxnId[s]` | `Nat` | Highest transaction ID seen (rejects lower ones) |
 
 ### Messages
 
@@ -62,14 +65,18 @@ This specification models a 2PC-style protocol for atomically renaming a key (`A
 
 ## Message Types
 
+All messages include a `txnId` field to prevent stale messages from old transactions being processed after recovery.
+
 | Message | Fields | Description |
 |---------|--------|-------------|
-| `LockReq` | `type, store` | Request to lock `A` and `A'` in store |
-| `LockResp` | `type, store, success` | Lock result (`success=FALSE` if `A'` exists or already renamed) |
-| `RenameReq` | `type, store` | Request to rename `A` → `A'` |
-| `RenameResp` | `type, store` | Confirmation of rename |
-| `UnlockReq` | `type, store` | Request to release locks |
-| `UnlockResp` | `type, store` | Confirmation of unlock |
+| `LockReq` | `type, store, txnId` | Request to lock `A` and `A'` in store |
+| `LockResp` | `type, store, success, txnId` | Lock result (`success=FALSE` if `A'` exists or already renamed) |
+| `RenameReq` | `type, store, txnId` | Request to rename `A` → `A'` |
+| `RenameResp` | `type, store, txnId` | Confirmation of rename |
+| `UnlockReq` | `type, store, txnId` | Request to release locks |
+| `UnlockResp` | `type, store, txnId` | Confirmation of unlock |
+
+> **Transaction ID mechanism**: Stores track the highest `txnId` they've seen in `lastSeenTxnId[s]`. When a message arrives with `txnId < lastSeenTxnId[s]`, it is silently rejected. This prevents old in-flight messages from interfering after coordinator crash/recovery.
 
 ---
 
@@ -133,7 +140,7 @@ RecvUnlockResp(s):
 
 ### KV Store Actions
 
-All handlers are **idempotent** to handle message duplication:
+All handlers are **idempotent** to handle message duplication and **reject stale txnIds**:
 
 | Action | Behavior |
 |--------|----------|
@@ -141,46 +148,63 @@ All handlers are **idempotent** to handle message duplication:
 | `HandleRenameReq(s)` | See detailed logic below |
 | `HandleUnlockReq(s)` | Release locks if held; no-op otherwise; always send `UnlockResp` |
 
-#### Handling `LockReq` (idempotent)
+> **Stale message rejection**: All handlers first check if `msg.txnId < lastSeenTxnId[s]`. If so, the message is silently discarded. Otherwise, `lastSeenTxnId[s]` is updated to `msg.txnId`.
+
+#### Handling `LockReq` (idempotent, rejects old txnId)
 
 ```
-HandleLockReq(s):
-    if storeKey[s] = "A'":
-        \* Already renamed — lock fails
-        send LockResp(s, FALSE)
-    else if lockA[s] = TRUE:
-        \* Already locked — idempotent success
-        send LockResp(s, TRUE)
+HandleLockReq(s, msg):
+    if msg.txnId < lastSeenTxnId[s]:
+        \* OLD transaction — reject silently
+        discard msg
     else:
-        \* Acquire locks
-        lockA[s] = TRUE
-        lockAprime[s] = TRUE
-        send LockResp(s, TRUE)
+        lastSeenTxnId[s] = msg.txnId
+        if storeKey[s] = "A'":
+            \* Already renamed — lock fails
+            send LockResp(s, FALSE, msg.txnId)
+        else if lockA[s] = TRUE:
+            \* Already locked — idempotent success
+            send LockResp(s, TRUE, msg.txnId)
+        else:
+            \* Acquire locks
+            lockA[s] = TRUE
+            lockAprime[s] = TRUE
+            send LockResp(s, TRUE, msg.txnId)
 ```
 
-#### Handling `RenameReq` (idempotent)
+#### Handling `RenameReq` (idempotent, rejects old txnId)
 
 ```
-HandleRenameReq(s):
-    if storeKey[s] = "A'":
-        \* Already renamed — idempotent success
-        send RenameResp(s)
-    else if lockA[s] = TRUE:
-        \* Perform rename (value preserved)
-        storeKey[s] = "A'"
-        send RenameResp(s)
+HandleRenameReq(s, msg):
+    if msg.txnId < lastSeenTxnId[s]:
+        \* OLD transaction — reject silently
+        discard msg
     else:
-        \* Not locked — should not happen in correct protocol
-        \* Ignore or error
+        lastSeenTxnId[s] = msg.txnId
+        if storeKey[s] = "A'":
+            \* Already renamed — idempotent success
+            send RenameResp(s, msg.txnId)
+        else if lockA[s] = TRUE:
+            \* Perform rename (value preserved)
+            storeKey[s] = "A'"
+            send RenameResp(s, msg.txnId)
+        else:
+            \* Not locked — should not happen in correct protocol
+            \* Ignore or error
 ```
 
-#### Handling `UnlockReq` (idempotent)
+#### Handling `UnlockReq` (idempotent, rejects old txnId)
 
 ```
-HandleUnlockReq(s):
-    lockA[s] = FALSE
-    lockAprime[s] = FALSE
-    send UnlockResp(s)
+HandleUnlockReq(s, msg):
+    if msg.txnId < lastSeenTxnId[s]:
+        \* OLD transaction — reject silently
+        discard msg
+    else:
+        lastSeenTxnId[s] = msg.txnId
+        lockA[s] = FALSE
+        lockAprime[s] = FALSE
+        send UnlockResp(s, msg.txnId)
 ```
 
 ### Environment Actions
@@ -262,16 +286,21 @@ HandleUnlockReq(s):
 
 ## Recovery Scenarios
 
-When coordinator recovers (`coordPhase = idle` after crash):
+When coordinator recovers (`coordPhase = crashed` after crash):
+
+**Key step: Increment `currentTxnId`** — This invalidates all old in-flight messages, preventing stale messages from the aborted attempt from interfering with the new recovery attempt.
 
 | WAL State | Recovery Action |
 |-----------|-----------------|
-| `walCommitted = FALSE` | Set `coordPhase = cleanup`; send `UnlockReq` to all stores |
-| `walCommitted = TRUE` | Set `coordPhase = committed`; resend `RenameReq` to all stores |
+| `walCommitted = FALSE` | Increment `currentTxnId`; set `coordPhase = cleanup`; send `UnlockReq` (with new txnId) to all stores |
+| `walCommitted = TRUE` | Increment `currentTxnId`; set `coordPhase = committed`; resend `RenameReq` (with new txnId) to all stores |
 
 > **Why this works**:
+> - **Transaction ID prevents stale message interference**: After recovery, old in-flight messages (e.g., delayed `LockReq` from the crashed attempt) have a stale `txnId`. Stores reject these because `oldTxnId < lastSeenTxnId[s]` after processing new messages.
 > - If not committed: Some stores may have locks, some may not. Entering `cleanup` phase and sending `UnlockReq` to all is safe (idempotent). Coordinator collects `UnlockResp` and transitions to `done` when all stores acknowledge.
 > - If committed: Some stores may have renamed, some may not. Resending `RenameReq` to all is safe (idempotent). Coordinator rebuilds `renamesDone` from responses.
+
+> **Race condition prevented**: Without txnId, an old `LockReq` delayed in the network could arrive AFTER cleanup completed, causing the store to re-acquire locks while the coordinator believes it's done — leading to deadlock. The txnId mechanism ensures such stale messages are silently ignored.
 
 ---
 
@@ -279,9 +308,9 @@ When coordinator recovers (`coordPhase = idle` after crash):
 
 | Component | Message | Duplicate Handling |
 |-----------|---------|-------------------|
-| **KV Store** | `LockReq` | Already locked → respond success |
-| **KV Store** | `RenameReq` | Already `A'` → respond success |
-| **KV Store** | `UnlockReq` | Not locked → no-op, always respond |
+| **KV Store** | `LockReq` | Stale txnId → reject; Already locked → respond success |
+| **KV Store** | `RenameReq` | Stale txnId → reject; Already `A'` → respond success |
+| **KV Store** | `UnlockReq` | Stale txnId → reject; Not locked → no-op, always respond |
 | **Coordinator** | `LockResp` | `s ∈ locksAcquired` → ignore |
 | **Coordinator** | `RenameResp` | `s ∈ renamesDone` → ignore |
 | **Coordinator** | `UnlockResp` | `s ∈ unlocksAcked` → ignore |
