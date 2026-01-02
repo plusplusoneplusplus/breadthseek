@@ -288,11 +288,59 @@ While locked, external updates cannot modify the value. (Enforced by `UpdateValu
 
 ---
 
+## Liveness Properties
+
+### Fairness Assumptions
+
+Liveness requires the following fairness assumptions:
+
+| Assumption | Description |
+|------------|-------------|
+| **Weak fairness on coordinator actions** | If a coordinator action is continuously enabled, it eventually executes |
+| **Weak fairness on store handlers** | If a message can be processed, it eventually is |
+| **Message eventual delivery** | Messages are not lost forever; retransmission eventually succeeds |
+| **Coordinator eventual recovery** | If the coordinator crashes, it eventually recovers |
+
+### 1. Eventually Stable
+
+```tla
+EventuallyStable == <>(
+    \* Aborted/Not-started: clean initial state
+    (coordPhase = "idle" /\ ~walCommitted /\
+     \A s \in Stores: storeKey[s] = "A" /\ ~lockA[s] /\ ~lockAprime[s])
+  \/
+    \* Committed/Done: clean final state
+    (coordPhase = "done" /\ walCommitted /\
+     \A s \in Stores: storeKey[s] = "A'")
+)
+```
+
+The system eventually reaches one of two terminal states:
+- **Not-started/Aborted:** No commit recorded, all stores at key `A`, no locks held
+- **Committed/Done:** Commit recorded, all stores renamed to `A'`, protocol complete
+
+### 2. Committed Implies Eventually Done
+
+```tla
+CommittedImpliesEventuallyDone == walCommitted ~> (coordPhase = "done")
+```
+
+If the coordinator commits (writes to WAL), the protocol eventually completes. This ensures no permanent partial-commit state.
+
+### 3. No Permanent Locks
+
+```tla
+NoPermanentLocks == \A s \in Stores: lockA[s] ~> ~lockA[s]
+```
+
+Any lock that is acquired is eventually released. Locks do not persist indefinitely.
+
+---
+
 ## Non-Goals (Not Modeled)
 
 - KV store crashes (only coordinator crashes)
 - Concurrent `get`/`put` during rename (only `UpdateValue` when unlocked)
-- Liveness properties (e.g., "rename eventually completes")
 - More than 2 stores (easily generalizable)
 
 ---

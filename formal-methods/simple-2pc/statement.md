@@ -75,3 +75,14 @@ After a crash, the coordinator uses its WAL to decide:
 |-----------|-----------------|
 | Commit **not** recorded | Ensure locks are released and continue with `A` |
 | Commit recorded | Retry remaining `rename(A, A')` until all stores complete, then use `A'` |
+
+---
+
+## Liveness Requirement
+
+The protocol must eventually terminate in a stable state:
+
+1. **Aborted/Not-started:** If commit was never recorded, the system returns to using key `A` across all stores with no locks held.
+2. **Committed/Done:** If commit was recorded, all stores eventually complete the rename to `A'`.
+
+The system must never remain indefinitely in an intermediate state (e.g., locks held forever, partial renames).
