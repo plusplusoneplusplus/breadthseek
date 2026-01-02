@@ -7,6 +7,20 @@
 (*   - Coordinator crash recovery (WAL-backed)                             *)
 (*   - Message loss and duplication                                        *)
 (*   - Value updates when unlocked                                         *)
+(*   - Transaction IDs to prevent stale message interference               *)
+(*                                                                         *)
+(* CHANGELOG:                                                              *)
+(* 2026-01-02: Added transaction ID mechanism                              *)
+(*   - Problem: After coordinator crash/recovery, old in-flight messages   *)
+(*     could be processed by stores AFTER cleanup completed, causing       *)
+(*     deadlock (stores hold locks, coordinator thinks it's done)          *)
+(*   - Solution: Each protocol attempt gets a unique transaction ID        *)
+(*     * currentTxnId: Durable coordinator state, incremented on recovery  *)
+(*     * lastSeenTxnId[store]: Stores track highest txnId seen             *)
+(*     * All messages include txnId field                                  *)
+(*     * Stores reject messages with txnId < lastSeenTxnId[store]          *)
+(*   - Effect: Old messages from aborted transactions are silently         *)
+(*     ignored, preventing race conditions during crash recovery           *)
 (***************************************************************************)
 
 EXTENDS Naturals, FiniteSets
@@ -16,19 +30,20 @@ CONSTANTS
     Values      \* Possible values, e.g., {0, 1, 2}
 
 (***************************************************************************)
-(* Message type constructors                                               *)
+(* Message type constructors (now include txnId)                           *)
 (***************************************************************************)
-LockReqMsg(s)           == [type |-> "LockReq", store |-> s]
-LockRespMsg(s, ok)      == [type |-> "LockResp", store |-> s, success |-> ok]
-RenameReqMsg(s)         == [type |-> "RenameReq", store |-> s]
-RenameRespMsg(s)        == [type |-> "RenameResp", store |-> s]
-UnlockReqMsg(s)         == [type |-> "UnlockReq", store |-> s]
-UnlockRespMsg(s)        == [type |-> "UnlockResp", store |-> s]
+LockReqMsg(s, txnId)           == [type |-> "LockReq", store |-> s, txnId |-> txnId]
+LockRespMsg(s, ok, txnId)      == [type |-> "LockResp", store |-> s, success |-> ok, txnId |-> txnId]
+RenameReqMsg(s, txnId)         == [type |-> "RenameReq", store |-> s, txnId |-> txnId]
+RenameRespMsg(s, txnId)        == [type |-> "RenameResp", store |-> s, txnId |-> txnId]
+UnlockReqMsg(s, txnId)         == [type |-> "UnlockReq", store |-> s, txnId |-> txnId]
+UnlockRespMsg(s, txnId)        == [type |-> "UnlockResp", store |-> s, txnId |-> txnId]
 
 VARIABLES
     (***************************************************************)
     (* Coordinator state                                           *)
     (***************************************************************)
+    currentTxnId,   \* Nat - durable, survives crash (incremented on each attempt)
     coordPhase,     \* {idle, preparing, committed, cleanup, done, crashed}
     walCommitted,   \* BOOLEAN - durable, survives crash
     locksAcquired,  \* SUBSET Stores - volatile
@@ -42,22 +57,26 @@ VARIABLES
     storeValue,     \* [Stores -> Values]
     lockA,          \* [Stores -> BOOLEAN]
     lockAprime,     \* [Stores -> BOOLEAN]
+    lastSeenTxnId,  \* [Stores -> Nat] - highest txnId seen, rejects lower ones
 
     (***************************************************************)
     (* Network                                                     *)
     (***************************************************************)
     messages        \* Set of messages (removed after processing to reduce state space)
 
-vars == <<coordPhase, walCommitted, locksAcquired, renamesDone, unlocksAcked,
-          storeKey, storeValue, lockA, lockAprime, messages>>
+vars == <<currentTxnId, coordPhase, walCommitted, locksAcquired, renamesDone, unlocksAcked,
+          storeKey, storeValue, lockA, lockAprime, lastSeenTxnId, messages>>
 
-coordVars == <<coordPhase, walCommitted, locksAcquired, renamesDone, unlocksAcked>>
-storeVars == <<storeKey, storeValue, lockA, lockAprime>>
+durableCoordVars == <<currentTxnId, walCommitted>>
+volatileCoordVars == <<coordPhase, locksAcquired, renamesDone, unlocksAcked>>
+coordVars == <<currentTxnId, coordPhase, walCommitted, locksAcquired, renamesDone, unlocksAcked>>
+storeVars == <<storeKey, storeValue, lockA, lockAprime, lastSeenTxnId>>
 
 (***************************************************************************)
 (* Type invariant                                                          *)
 (***************************************************************************)
 TypeOK ==
+    /\ currentTxnId \in Nat
     /\ coordPhase \in {"idle", "preparing", "committed", "cleanup", "done", "crashed"}
     /\ walCommitted \in BOOLEAN
     /\ locksAcquired \subseteq Stores
@@ -67,11 +86,13 @@ TypeOK ==
     /\ storeValue \in [Stores -> Values]
     /\ lockA \in [Stores -> BOOLEAN]
     /\ lockAprime \in [Stores -> BOOLEAN]
+    /\ lastSeenTxnId \in [Stores -> Nat]
 
 (***************************************************************************)
 (* Initial state                                                           *)
 (***************************************************************************)
 Init ==
+    /\ currentTxnId = 1
     /\ coordPhase = "idle"
     /\ walCommitted = FALSE
     /\ locksAcquired = {}
@@ -81,6 +102,7 @@ Init ==
     /\ storeValue \in [Stores -> Values]  \* Any initial value
     /\ lockA = [s \in Stores |-> FALSE]
     /\ lockAprime = [s \in Stores |-> FALSE]
+    /\ lastSeenTxnId = [s \in Stores |-> 0]
     /\ messages = {}
 
 (***************************************************************************)
@@ -90,29 +112,29 @@ Init ==
 \* Send lock request to a store
 SendLockReq(s) ==
     /\ coordPhase \in {"idle", "preparing"}
-    /\ messages' = messages \cup {LockReqMsg(s)}
+    /\ messages' = messages \cup {LockReqMsg(s, currentTxnId)}
     /\ coordPhase' = "preparing"
-    /\ UNCHANGED <<walCommitted, locksAcquired, renamesDone, unlocksAcked, storeVars>>
+    /\ UNCHANGED <<currentTxnId, walCommitted, locksAcquired, renamesDone, unlocksAcked, storeVars>>
 
 \* Receive successful lock response
 RecvLockRespSuccess(s) ==
     /\ coordPhase = "preparing"
-    /\ LockRespMsg(s, TRUE) \in messages
+    /\ LockRespMsg(s, TRUE, currentTxnId) \in messages
     /\ s \notin locksAcquired
     /\ locksAcquired' = locksAcquired \cup {s}
-    /\ messages' = messages \ {LockRespMsg(s, TRUE)}  \* Remove after processing
-    /\ UNCHANGED <<coordPhase, walCommitted, renamesDone, unlocksAcked, storeVars>>
+    /\ messages' = messages \ {LockRespMsg(s, TRUE, currentTxnId)}  \* Remove after processing
+    /\ UNCHANGED <<currentTxnId, coordPhase, walCommitted, renamesDone, unlocksAcked, storeVars>>
 
 \* Receive failed lock response -> enter cleanup phase
 RecvLockRespFailure(s) ==
     /\ coordPhase = "preparing"
-    /\ LockRespMsg(s, FALSE) \in messages
+    /\ LockRespMsg(s, FALSE, currentTxnId) \in messages
     /\ coordPhase' = "cleanup"
     /\ locksAcquired' = {}
     /\ renamesDone' = {}
     /\ unlocksAcked' = {}
-    /\ messages' = messages \ {LockRespMsg(s, FALSE)}
-    /\ UNCHANGED <<walCommitted, storeVars>>
+    /\ messages' = messages \ {LockRespMsg(s, FALSE, currentTxnId)}
+    /\ UNCHANGED <<currentTxnId, walCommitted, storeVars>>
 
 \* Decide to commit (all locks acquired)
 DecideCommit ==
@@ -120,45 +142,45 @@ DecideCommit ==
     /\ locksAcquired = Stores
     /\ walCommitted' = TRUE
     /\ coordPhase' = "committed"
-    /\ UNCHANGED <<locksAcquired, renamesDone, unlocksAcked, storeVars, messages>>
+    /\ UNCHANGED <<currentTxnId, locksAcquired, renamesDone, unlocksAcked, storeVars, messages>>
 
 \* Send rename request to a store
 SendRenameReq(s) ==
     /\ coordPhase = "committed"
-    /\ messages' = messages \cup {RenameReqMsg(s)}
+    /\ messages' = messages \cup {RenameReqMsg(s, currentTxnId)}
     /\ UNCHANGED <<coordVars, storeVars>>
 
 \* Receive rename response - transition to cleanup when all renames done
 RecvRenameResp(s) ==
     /\ coordPhase = "committed"
-    /\ RenameRespMsg(s) \in messages
+    /\ RenameRespMsg(s, currentTxnId) \in messages
     /\ s \notin renamesDone
     /\ renamesDone' = renamesDone \cup {s}
     /\ IF renamesDone' = Stores
        THEN coordPhase' = "cleanup"  \* Go to cleanup to release locks
        ELSE coordPhase' = coordPhase
-    /\ messages' = messages \ {RenameRespMsg(s)}  \* Remove after processing
-    /\ UNCHANGED <<walCommitted, locksAcquired, unlocksAcked, storeVars>>
+    /\ messages' = messages \ {RenameRespMsg(s, currentTxnId)}  \* Remove after processing
+    /\ UNCHANGED <<currentTxnId, walCommitted, locksAcquired, unlocksAcked, storeVars>>
 
 \* Send unlock request to a store (during cleanup phase)
 SendUnlockReq(s) ==
     /\ coordPhase = "cleanup"
-    /\ messages' = messages \cup {UnlockReqMsg(s)}
+    /\ messages' = messages \cup {UnlockReqMsg(s, currentTxnId)}
     /\ UNCHANGED <<coordVars, storeVars>>
 
 \* Receive unlock response - transition to done when all unlocks acknowledged
 RecvUnlockResp(s) ==
     /\ coordPhase = "cleanup"
-    /\ UnlockRespMsg(s) \in messages
+    /\ UnlockRespMsg(s, currentTxnId) \in messages
     /\ s \notin unlocksAcked
     /\ unlocksAcked' = unlocksAcked \cup {s}
     /\ IF unlocksAcked' = Stores
        THEN coordPhase' = "done"
        ELSE coordPhase' = coordPhase
-    /\ messages' = messages \ {UnlockRespMsg(s)}  \* Remove after processing
-    /\ UNCHANGED <<walCommitted, locksAcquired, renamesDone, storeVars>>
+    /\ messages' = messages \ {UnlockRespMsg(s, currentTxnId)}  \* Remove after processing
+    /\ UNCHANGED <<currentTxnId, walCommitted, locksAcquired, renamesDone, storeVars>>
 
-\* Coordinator crash - reset volatile state, keep WAL
+\* Coordinator crash - reset volatile state, keep durable state (currentTxnId, walCommitted)
 \* Transitions to "crashed" phase - must recover before starting new protocol
 CoordinatorCrash ==
     /\ coordPhase \in {"preparing", "committed", "cleanup"}  \* Can crash during protocol
@@ -166,66 +188,93 @@ CoordinatorCrash ==
     /\ locksAcquired' = {}
     /\ renamesDone' = {}
     /\ unlocksAcked' = {}
-    /\ UNCHANGED <<walCommitted, storeVars, messages>>
+    /\ UNCHANGED <<durableCoordVars, storeVars, messages>>
 
-\* Coordinator recovery - must happen after crash before new protocol can start
+\* Coordinator recovery - increments txnId to invalidate old messages
 CoordinatorRecover ==
     /\ coordPhase = "crashed"
+    /\ currentTxnId' = currentTxnId + 1  \* NEW txnId makes all old messages obsolete
     /\ IF walCommitted
-       THEN \* Committed - resume commit phase, resend RenameReq to all stores
+       THEN \* Committed - resume commit phase, resend RenameReq with NEW txnId
             /\ coordPhase' = "committed"
-            /\ messages' = messages \cup {RenameReqMsg(s) : s \in Stores}
+            /\ messages' = messages \cup {RenameReqMsg(s, currentTxnId') : s \in Stores}
             /\ UNCHANGED <<walCommitted, locksAcquired, renamesDone, unlocksAcked, storeVars>>
-       ELSE \* Not committed - send unlocks to cleanup, return to idle
+       ELSE \* Not committed - send unlocks with NEW txnId to cleanup
             /\ coordPhase' = "cleanup"
             /\ unlocksAcked' = {}  \* Reset unlock tracking
-            /\ messages' = messages \cup {UnlockReqMsg(s) : s \in Stores}
+            /\ messages' = messages \cup {UnlockReqMsg(s, currentTxnId') : s \in Stores}
             /\ UNCHANGED <<walCommitted, locksAcquired, renamesDone, storeVars>>
 
 (***************************************************************************)
 (* KV Store Actions                                                        *)
 (***************************************************************************)
 
-\* Handle lock request (remove message after processing)
+\* Handle lock request - rejects old txnIds
 HandleLockReq(s) ==
-    /\ LockReqMsg(s) \in messages
-    /\ IF storeKey[s] = "A'"
-       THEN \* Already renamed - lock fails
-            /\ messages' = (messages \ {LockReqMsg(s)}) \cup {LockRespMsg(s, FALSE)}
-            /\ UNCHANGED <<coordVars, storeVars>>
-       ELSE IF lockA[s]
-            THEN \* Already locked - success
-                 /\ messages' = (messages \ {LockReqMsg(s)}) \cup {LockRespMsg(s, TRUE)}
-                 /\ UNCHANGED <<coordVars, storeVars>>
-            ELSE \* Acquire locks
-                 /\ lockA' = [lockA EXCEPT ![s] = TRUE]
-                 /\ lockAprime' = [lockAprime EXCEPT ![s] = TRUE]
-                 /\ messages' = (messages \ {LockReqMsg(s)}) \cup {LockRespMsg(s, TRUE)}
-                 /\ UNCHANGED <<coordVars, storeKey, storeValue>>
+    /\ \E m \in messages :
+        /\ m.type = "LockReq"
+        /\ m.store = s
+        /\ IF m.txnId < lastSeenTxnId[s]
+           THEN \* OLD transaction - reject silently
+                /\ messages' = messages \ {m}
+                /\ UNCHANGED <<coordVars, storeVars>>
+           ELSE IF storeKey[s] = "A'"
+                THEN \* Already renamed - lock fails
+                     /\ messages' = (messages \ {m}) \cup {LockRespMsg(s, FALSE, m.txnId)}
+                     /\ lastSeenTxnId' = [lastSeenTxnId EXCEPT ![s] = m.txnId]
+                     /\ UNCHANGED <<coordVars, storeKey, storeValue, lockA, lockAprime>>
+                ELSE IF lockA[s]
+                     THEN \* Already locked - success (idempotent)
+                          /\ messages' = (messages \ {m}) \cup {LockRespMsg(s, TRUE, m.txnId)}
+                          /\ lastSeenTxnId' = [lastSeenTxnId EXCEPT ![s] = m.txnId]
+                          /\ UNCHANGED <<coordVars, storeKey, storeValue, lockA, lockAprime>>
+                     ELSE \* Acquire locks
+                          /\ lockA' = [lockA EXCEPT ![s] = TRUE]
+                          /\ lockAprime' = [lockAprime EXCEPT ![s] = TRUE]
+                          /\ lastSeenTxnId' = [lastSeenTxnId EXCEPT ![s] = m.txnId]
+                          /\ messages' = (messages \ {m}) \cup {LockRespMsg(s, TRUE, m.txnId)}
+                          /\ UNCHANGED <<coordVars, storeKey, storeValue>>
 
-\* Handle rename request (remove message after processing)
+\* Handle rename request - rejects old txnIds
 HandleRenameReq(s) ==
-    /\ RenameReqMsg(s) \in messages
-    /\ IF storeKey[s] = "A'"
-       THEN \* Already renamed - success
-            /\ messages' = (messages \ {RenameReqMsg(s)}) \cup {RenameRespMsg(s)}
-            /\ UNCHANGED <<coordVars, storeVars>>
-       ELSE IF lockA[s]
-            THEN \* Perform rename (value preserved)
-                 /\ storeKey' = [storeKey EXCEPT ![s] = "A'"]
-                 /\ messages' = (messages \ {RenameReqMsg(s)}) \cup {RenameRespMsg(s)}
-                 /\ UNCHANGED <<coordVars, storeValue, lockA, lockAprime>>
-            ELSE \* Not locked - ignore (shouldn't happen in correct protocol)
-                 /\ messages' = messages \ {RenameReqMsg(s)}  \* Still remove message
-                 /\ UNCHANGED <<coordVars, storeVars>>
+    /\ \E m \in messages :
+        /\ m.type = "RenameReq"
+        /\ m.store = s
+        /\ IF m.txnId < lastSeenTxnId[s]
+           THEN \* OLD transaction - reject silently
+                /\ messages' = messages \ {m}
+                /\ UNCHANGED <<coordVars, storeVars>>
+           ELSE IF storeKey[s] = "A'"
+                THEN \* Already renamed - success (idempotent)
+                     /\ messages' = (messages \ {m}) \cup {RenameRespMsg(s, m.txnId)}
+                     /\ lastSeenTxnId' = [lastSeenTxnId EXCEPT ![s] = m.txnId]
+                     /\ UNCHANGED <<coordVars, storeKey, storeValue, lockA, lockAprime>>
+                ELSE IF lockA[s]
+                     THEN \* Perform rename (value preserved)
+                          /\ storeKey' = [storeKey EXCEPT ![s] = "A'"]
+                          /\ lastSeenTxnId' = [lastSeenTxnId EXCEPT ![s] = m.txnId]
+                          /\ messages' = (messages \ {m}) \cup {RenameRespMsg(s, m.txnId)}
+                          /\ UNCHANGED <<coordVars, storeValue, lockA, lockAprime>>
+                     ELSE \* Not locked - ignore (shouldn't happen in correct protocol)
+                          /\ messages' = messages \ {m}
+                          /\ lastSeenTxnId' = [lastSeenTxnId EXCEPT ![s] = m.txnId]
+                          /\ UNCHANGED <<coordVars, storeKey, storeValue, lockA, lockAprime>>
 
-\* Handle unlock request (remove message after processing, send response)
+\* Handle unlock request - rejects old txnIds
 HandleUnlockReq(s) ==
-    /\ UnlockReqMsg(s) \in messages
-    /\ lockA' = [lockA EXCEPT ![s] = FALSE]
-    /\ lockAprime' = [lockAprime EXCEPT ![s] = FALSE]
-    /\ messages' = (messages \ {UnlockReqMsg(s)}) \cup {UnlockRespMsg(s)}
-    /\ UNCHANGED <<coordVars, storeKey, storeValue>>
+    /\ \E m \in messages :
+        /\ m.type = "UnlockReq"
+        /\ m.store = s
+        /\ IF m.txnId < lastSeenTxnId[s]
+           THEN \* OLD transaction - reject silently
+                /\ messages' = messages \ {m}
+                /\ UNCHANGED <<coordVars, storeVars>>
+           ELSE \* Accept unlock
+                /\ lockA' = [lockA EXCEPT ![s] = FALSE]
+                /\ lockAprime' = [lockAprime EXCEPT ![s] = FALSE]
+                /\ lastSeenTxnId' = [lastSeenTxnId EXCEPT ![s] = m.txnId]
+                /\ messages' = (messages \ {m}) \cup {UnlockRespMsg(s, m.txnId)}
+                /\ UNCHANGED <<coordVars, storeKey, storeValue>>
 
 (***************************************************************************)
 (* Environment Actions                                                     *)
@@ -241,7 +290,7 @@ LoseMessage(m) ==
 UpdateValue(s, v) ==
     /\ lockA[s] = FALSE
     /\ storeValue' = [storeValue EXCEPT ![s] = v]
-    /\ UNCHANGED <<coordVars, storeKey, lockA, lockAprime, messages>>
+    /\ UNCHANGED <<coordVars, storeKey, lockA, lockAprime, lastSeenTxnId, messages>>
 
 (***************************************************************************)
 (* Next state relation                                                     *)
