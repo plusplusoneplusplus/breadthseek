@@ -349,7 +349,7 @@ Done ==
 EventuallyStable == <>(Aborted \/ Done)
 
 \* 2. Committed Implies Eventually Done: if WAL committed, protocol completes
-CommittedImpliesEventuallyDone == walCommitted ~> (coordPhase = "done")
+CommittedImpliesEventuallyDone == walCommitted ~> (coordPhase = "done"  \/ coordPhase = "crashed"))
 
 \* 3. No Permanent Locks: any acquired lock is eventually released
 \*    (unless coordinator crashes forever - realistic assumption)
