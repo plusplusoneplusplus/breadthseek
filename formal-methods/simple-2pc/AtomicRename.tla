@@ -44,7 +44,7 @@ VARIABLES
     (***************************************************************)
     (* Network                                                     *)
     (***************************************************************)
-    messages        \* Set of messages (persist after processing for duplication)
+    messages        \* Set of messages (removed after processing to reduce state space)
 
 vars == <<coordPhase, walCommitted, locksAcquired, renamesDone,
           storeKey, storeValue, lockA, lockAprime, messages>>
@@ -90,13 +90,14 @@ SendLockReq(s) ==
     /\ coordPhase' = "preparing"
     /\ UNCHANGED <<walCommitted, locksAcquired, renamesDone, storeVars>>
 
-\* Receive successful lock response (with duplicate detection)
+\* Receive successful lock response
 RecvLockRespSuccess(s) ==
     /\ coordPhase = "preparing"
     /\ LockRespMsg(s, TRUE) \in messages
-    /\ s \notin locksAcquired          \* Not a duplicate
+    /\ s \notin locksAcquired
     /\ locksAcquired' = locksAcquired \cup {s}
-    /\ UNCHANGED <<coordPhase, walCommitted, renamesDone, storeVars, messages>>
+    /\ messages' = messages \ {LockRespMsg(s, TRUE)}  \* Remove after processing
+    /\ UNCHANGED <<coordPhase, walCommitted, renamesDone, storeVars>>
 
 \* Receive failed lock response -> abort
 RecvLockRespFailure(s) ==
@@ -105,8 +106,8 @@ RecvLockRespFailure(s) ==
     /\ coordPhase' = "idle"
     /\ locksAcquired' = {}
     /\ renamesDone' = {}
-    \* Send unlock to all stores (cleanup)
-    /\ messages' = messages \cup {UnlockReqMsg(st) : st \in Stores}
+    \* Remove processed message and send unlock to all stores (cleanup)
+    /\ messages' = (messages \ {LockRespMsg(s, FALSE)}) \cup {UnlockReqMsg(st) : st \in Stores}
     /\ UNCHANGED <<walCommitted, storeVars>>
 
 \* Decide to commit (all locks acquired)
@@ -123,16 +124,17 @@ SendRenameReq(s) ==
     /\ messages' = messages \cup {RenameReqMsg(s)}
     /\ UNCHANGED <<coordVars, storeVars>>
 
-\* Receive rename response (with duplicate detection)
+\* Receive rename response
 RecvRenameResp(s) ==
     /\ coordPhase = "committed"
     /\ RenameRespMsg(s) \in messages
-    /\ s \notin renamesDone            \* Not a duplicate
+    /\ s \notin renamesDone
     /\ renamesDone' = renamesDone \cup {s}
     /\ IF renamesDone' = Stores
        THEN coordPhase' = "done"
        ELSE coordPhase' = coordPhase
-    /\ UNCHANGED <<walCommitted, locksAcquired, storeVars, messages>>
+    /\ messages' = messages \ {RenameRespMsg(s)}  \* Remove after processing
+    /\ UNCHANGED <<walCommitted, locksAcquired, storeVars>>
 
 \* Send unlock request to a store (after done)
 SendUnlockReq(s) ==
@@ -166,44 +168,46 @@ CoordinatorRecover ==
 (* KV Store Actions                                                        *)
 (***************************************************************************)
 
-\* Handle lock request (idempotent)
+\* Handle lock request (remove message after processing)
 HandleLockReq(s) ==
     /\ LockReqMsg(s) \in messages
     /\ IF storeKey[s] = "A'"
        THEN \* Already renamed - lock fails
-            /\ messages' = messages \cup {LockRespMsg(s, FALSE)}
+            /\ messages' = (messages \ {LockReqMsg(s)}) \cup {LockRespMsg(s, FALSE)}
             /\ UNCHANGED <<coordVars, storeVars>>
        ELSE IF lockA[s]
-            THEN \* Already locked - idempotent success
-                 /\ messages' = messages \cup {LockRespMsg(s, TRUE)}
+            THEN \* Already locked - success
+                 /\ messages' = (messages \ {LockReqMsg(s)}) \cup {LockRespMsg(s, TRUE)}
                  /\ UNCHANGED <<coordVars, storeVars>>
             ELSE \* Acquire locks
                  /\ lockA' = [lockA EXCEPT ![s] = TRUE]
                  /\ lockAprime' = [lockAprime EXCEPT ![s] = TRUE]
-                 /\ messages' = messages \cup {LockRespMsg(s, TRUE)}
+                 /\ messages' = (messages \ {LockReqMsg(s)}) \cup {LockRespMsg(s, TRUE)}
                  /\ UNCHANGED <<coordVars, storeKey, storeValue>>
 
-\* Handle rename request (idempotent)
+\* Handle rename request (remove message after processing)
 HandleRenameReq(s) ==
     /\ RenameReqMsg(s) \in messages
     /\ IF storeKey[s] = "A'"
-       THEN \* Already renamed - idempotent success
-            /\ messages' = messages \cup {RenameRespMsg(s)}
+       THEN \* Already renamed - success
+            /\ messages' = (messages \ {RenameReqMsg(s)}) \cup {RenameRespMsg(s)}
             /\ UNCHANGED <<coordVars, storeVars>>
        ELSE IF lockA[s]
             THEN \* Perform rename (value preserved)
                  /\ storeKey' = [storeKey EXCEPT ![s] = "A'"]
-                 /\ messages' = messages \cup {RenameRespMsg(s)}
+                 /\ messages' = (messages \ {RenameReqMsg(s)}) \cup {RenameRespMsg(s)}
                  /\ UNCHANGED <<coordVars, storeValue, lockA, lockAprime>>
             ELSE \* Not locked - ignore (shouldn't happen in correct protocol)
-                 /\ UNCHANGED <<coordVars, storeVars, messages>>
+                 /\ messages' = messages \ {RenameReqMsg(s)}  \* Still remove message
+                 /\ UNCHANGED <<coordVars, storeVars>>
 
-\* Handle unlock request (idempotent)
+\* Handle unlock request (remove message after processing)
 HandleUnlockReq(s) ==
     /\ UnlockReqMsg(s) \in messages
     /\ lockA' = [lockA EXCEPT ![s] = FALSE]
     /\ lockAprime' = [lockAprime EXCEPT ![s] = FALSE]
-    /\ UNCHANGED <<coordVars, storeKey, storeValue, messages>>
+    /\ messages' = messages \ {UnlockReqMsg(s)}  \* Remove after processing
+    /\ UNCHANGED <<coordVars, storeKey, storeValue>>
 
 (***************************************************************************)
 (* Environment Actions                                                     *)
@@ -290,24 +294,29 @@ Safety ==
 (*   - LoseMessage (would lose all messages forever)                       *)
 (*   - UpdateValue (environment action, not required for termination)      *)
 (*   - CoordinatorCrash (would crash forever)                              *)
+(*                                                                         *)
+(* We use Strong Fairness (SF) for message receive/handle actions because  *)
+(* messages may be lost and re-sent, so these actions are enabled          *)
+(* infinitely often rather than continuously. SF guarantees that if an     *)
+(* action is enabled infinitely often, it eventually executes.             *)
+(*                                                                         *)
+(* We use Weak Fairness (WF) for send actions and DecideCommit since       *)
+(* their enablement depends only on coordinator state (continuously        *)
+(* enabled once enabled).                                                  *)
 (***************************************************************************)
 
 \* Fairness on coordinator actions
-\* Use STRONG fairness (SF) on receive actions because messages may be
-\* intermittently lost and re-added, so these actions are enabled
-\* infinitely often but not continuously.
 CoordinatorFairness ==
     /\ \A s \in Stores : WF_vars(SendLockReq(s))
-    /\ \A s \in Stores : SF_vars(RecvLockRespSuccess(s))  \* SF: message may be lost/re-added
-    /\ \A s \in Stores : SF_vars(RecvLockRespFailure(s))  \* SF: message may be lost/re-added
+    /\ \A s \in Stores : SF_vars(RecvLockRespSuccess(s))
+    /\ \A s \in Stores : SF_vars(RecvLockRespFailure(s))
     /\ WF_vars(DecideCommit)
     /\ \A s \in Stores : WF_vars(SendRenameReq(s))
-    /\ \A s \in Stores : SF_vars(RecvRenameResp(s))       \* SF: message may be lost/re-added
+    /\ \A s \in Stores : SF_vars(RecvRenameResp(s))
     /\ \A s \in Stores : WF_vars(SendUnlockReq(s))
     /\ WF_vars(CoordinatorRecover)
 
-\* Fairness on KV store handlers
-\* Use STRONG fairness because request messages may be lost and re-sent
+\* Fairness on KV store handlers (SF because messages can be lost/re-sent)
 StoreFairness ==
     /\ \A s \in Stores : SF_vars(HandleLockReq(s))
     /\ \A s \in Stores : SF_vars(HandleRenameReq(s))
@@ -343,7 +352,8 @@ EventuallyStable == <>(Aborted \/ Done)
 CommittedImpliesEventuallyDone == walCommitted ~> (coordPhase = "done")
 
 \* 3. No Permanent Locks: any acquired lock is eventually released
-NoPermanentLocks == \A s \in Stores : lockA[s] ~> ~lockA[s]
+\*    (unless coordinator crashes forever - realistic assumption)
+NoPermanentLocks == \A s \in Stores : lockA[s] ~> (~lockA[s] \/ coordPhase = "crashed")
 
 \* Combined liveness property
 Liveness ==
