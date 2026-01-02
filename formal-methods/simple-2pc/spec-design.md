@@ -294,12 +294,14 @@ While locked, external updates cannot modify the value. (Enforced by `UpdateValu
 
 Liveness requires the following fairness assumptions:
 
-| Assumption | Description |
-|------------|-------------|
-| **Weak fairness on coordinator actions** | If a coordinator action is continuously enabled, it eventually executes |
-| **Weak fairness on store handlers** | If a message can be processed, it eventually is |
-| **Message eventual delivery** | Messages are not lost forever; retransmission eventually succeeds |
-| **Coordinator eventual recovery** | If the coordinator crashes, it eventually recovers |
+| Assumption | Type | Description |
+|------------|------|-------------|
+| **Coordinator send actions** | Weak (WF) | If sending is continuously enabled, it eventually executes |
+| **Coordinator receive actions** | Strong (SF) | If receiving is enabled infinitely often, it eventually executes |
+| **Store handlers** | Strong (SF) | If a handler is enabled infinitely often, it eventually executes |
+| **Coordinator recovery** | Weak (WF) | If the coordinator is crashed, it eventually recovers |
+
+> **Why Strong Fairness?** With message loss and retransmission, response messages may be repeatedly lost and re-added to the network. This means receive actions are *intermittently* enabled (not continuously). Strong fairness ensures that if an action is enabled infinitely often, it eventually fires — modeling that retransmission eventually succeeds.
 
 ### 1. Eventually Stable
 

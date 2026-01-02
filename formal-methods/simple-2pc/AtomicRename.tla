@@ -28,7 +28,7 @@ VARIABLES
     (***************************************************************)
     (* Coordinator state                                           *)
     (***************************************************************)
-    coordPhase,     \* {idle, preparing, committed, done}
+    coordPhase,     \* {idle, preparing, committed, done, crashed}
     walCommitted,   \* BOOLEAN - durable, survives crash
     locksAcquired,  \* SUBSET Stores - volatile
     renamesDone,    \* SUBSET Stores - volatile
@@ -56,7 +56,7 @@ storeVars == <<storeKey, storeValue, lockA, lockAprime>>
 (* Type invariant                                                          *)
 (***************************************************************************)
 TypeOK ==
-    /\ coordPhase \in {"idle", "preparing", "committed", "done"}
+    /\ coordPhase \in {"idle", "preparing", "committed", "done", "crashed"}
     /\ walCommitted \in BOOLEAN
     /\ locksAcquired \subseteq Stores
     /\ renamesDone \subseteq Stores
@@ -141,23 +141,26 @@ SendUnlockReq(s) ==
     /\ UNCHANGED <<coordVars, storeVars>>
 
 \* Coordinator crash - reset volatile state, keep WAL
+\* Transitions to "crashed" phase - must recover before starting new protocol
 CoordinatorCrash ==
     /\ coordPhase \in {"preparing", "committed"}  \* Can crash during protocol
-    /\ coordPhase' = "idle"
+    /\ coordPhase' = "crashed"
     /\ locksAcquired' = {}
     /\ renamesDone' = {}
     /\ UNCHANGED <<walCommitted, storeVars, messages>>
 
-\* Coordinator recovery
+\* Coordinator recovery - must happen after crash before new protocol can start
 CoordinatorRecover ==
-    /\ coordPhase = "idle"
+    /\ coordPhase = "crashed"
     /\ IF walCommitted
-       THEN \* Committed - resume commit phase
+       THEN \* Committed - resume commit phase, resend RenameReq to all stores
             /\ coordPhase' = "committed"
-            /\ UNCHANGED <<walCommitted, locksAcquired, renamesDone, storeVars, messages>>
-       ELSE \* Not committed - send unlocks to cleanup any held locks
+            /\ messages' = messages \cup {RenameReqMsg(s) : s \in Stores}
+            /\ UNCHANGED <<walCommitted, locksAcquired, renamesDone, storeVars>>
+       ELSE \* Not committed - send unlocks to cleanup, return to idle
+            /\ coordPhase' = "idle"
             /\ messages' = messages \cup {UnlockReqMsg(s) : s \in Stores}
-            /\ UNCHANGED <<coordVars, storeVars>>
+            /\ UNCHANGED <<walCommitted, locksAcquired, renamesDone, storeVars>>
 
 (***************************************************************************)
 (* KV Store Actions                                                        *)
@@ -279,5 +282,73 @@ Safety ==
     /\ CommitConsistency
     /\ RenameImpliesCommit
     /\ CommittedImpliesWal
+
+(***************************************************************************)
+(* Fairness Conditions                                                     *)
+(*                                                                         *)
+(* For liveness, we need fairness on protocol actions but NOT on:          *)
+(*   - LoseMessage (would lose all messages forever)                       *)
+(*   - UpdateValue (environment action, not required for termination)      *)
+(*   - CoordinatorCrash (would crash forever)                              *)
+(***************************************************************************)
+
+\* Fairness on coordinator actions
+\* Use STRONG fairness (SF) on receive actions because messages may be
+\* intermittently lost and re-added, so these actions are enabled
+\* infinitely often but not continuously.
+CoordinatorFairness ==
+    /\ \A s \in Stores : WF_vars(SendLockReq(s))
+    /\ \A s \in Stores : SF_vars(RecvLockRespSuccess(s))  \* SF: message may be lost/re-added
+    /\ \A s \in Stores : SF_vars(RecvLockRespFailure(s))  \* SF: message may be lost/re-added
+    /\ WF_vars(DecideCommit)
+    /\ \A s \in Stores : WF_vars(SendRenameReq(s))
+    /\ \A s \in Stores : SF_vars(RecvRenameResp(s))       \* SF: message may be lost/re-added
+    /\ \A s \in Stores : WF_vars(SendUnlockReq(s))
+    /\ WF_vars(CoordinatorRecover)
+
+\* Fairness on KV store handlers
+\* Use STRONG fairness because request messages may be lost and re-sent
+StoreFairness ==
+    /\ \A s \in Stores : SF_vars(HandleLockReq(s))
+    /\ \A s \in Stores : SF_vars(HandleRenameReq(s))
+    /\ \A s \in Stores : SF_vars(HandleUnlockReq(s))
+
+\* Combined fairness for liveness
+Fairness == CoordinatorFairness /\ StoreFairness
+
+\* Specification with fairness (for liveness checking)
+FairSpec == Spec /\ Fairness
+
+(***************************************************************************)
+(* Liveness Properties                                                     *)
+(***************************************************************************)
+
+\* Terminal state: aborted/not-started
+Aborted ==
+    /\ coordPhase = "idle"
+    /\ ~walCommitted
+    /\ \A s \in Stores : storeKey[s] = "A"
+    /\ \A s \in Stores : ~lockA[s] /\ ~lockAprime[s]
+
+\* Terminal state: committed/done
+Done ==
+    /\ coordPhase = "done"
+    /\ walCommitted
+    /\ \A s \in Stores : storeKey[s] = "A'"
+
+\* 1. Eventually Stable: system reaches a terminal state
+EventuallyStable == <>(Aborted \/ Done)
+
+\* 2. Committed Implies Eventually Done: if WAL committed, protocol completes
+CommittedImpliesEventuallyDone == walCommitted ~> (coordPhase = "done")
+
+\* 3. No Permanent Locks: any acquired lock is eventually released
+NoPermanentLocks == \A s \in Stores : lockA[s] ~> ~lockA[s]
+
+\* Combined liveness property
+Liveness ==
+    /\ EventuallyStable
+    /\ CommittedImpliesEventuallyDone
+    /\ NoPermanentLocks
 
 =============================================================================
