@@ -23,15 +23,17 @@ LockRespMsg(s, ok)      == [type |-> "LockResp", store |-> s, success |-> ok]
 RenameReqMsg(s)         == [type |-> "RenameReq", store |-> s]
 RenameRespMsg(s)        == [type |-> "RenameResp", store |-> s]
 UnlockReqMsg(s)         == [type |-> "UnlockReq", store |-> s]
+UnlockRespMsg(s)        == [type |-> "UnlockResp", store |-> s]
 
 VARIABLES
     (***************************************************************)
     (* Coordinator state                                           *)
     (***************************************************************)
-    coordPhase,     \* {idle, preparing, committed, done, crashed}
+    coordPhase,     \* {idle, preparing, committed, cleanup, done, crashed}
     walCommitted,   \* BOOLEAN - durable, survives crash
     locksAcquired,  \* SUBSET Stores - volatile
     renamesDone,    \* SUBSET Stores - volatile
+    unlocksAcked,   \* SUBSET Stores - volatile (tracks unlock acknowledgments)
 
     (***************************************************************)
     (* KV Store state (per store)                                  *)
@@ -46,20 +48,21 @@ VARIABLES
     (***************************************************************)
     messages        \* Set of messages (removed after processing to reduce state space)
 
-vars == <<coordPhase, walCommitted, locksAcquired, renamesDone,
+vars == <<coordPhase, walCommitted, locksAcquired, renamesDone, unlocksAcked,
           storeKey, storeValue, lockA, lockAprime, messages>>
 
-coordVars == <<coordPhase, walCommitted, locksAcquired, renamesDone>>
+coordVars == <<coordPhase, walCommitted, locksAcquired, renamesDone, unlocksAcked>>
 storeVars == <<storeKey, storeValue, lockA, lockAprime>>
 
 (***************************************************************************)
 (* Type invariant                                                          *)
 (***************************************************************************)
 TypeOK ==
-    /\ coordPhase \in {"idle", "preparing", "committed", "done", "crashed"}
+    /\ coordPhase \in {"idle", "preparing", "committed", "cleanup", "done", "crashed"}
     /\ walCommitted \in BOOLEAN
     /\ locksAcquired \subseteq Stores
     /\ renamesDone \subseteq Stores
+    /\ unlocksAcked \subseteq Stores
     /\ storeKey \in [Stores -> {"A", "A'"}]
     /\ storeValue \in [Stores -> Values]
     /\ lockA \in [Stores -> BOOLEAN]
@@ -73,6 +76,7 @@ Init ==
     /\ walCommitted = FALSE
     /\ locksAcquired = {}
     /\ renamesDone = {}
+    /\ unlocksAcked = {}
     /\ storeKey = [s \in Stores |-> "A"]
     /\ storeValue \in [Stores -> Values]  \* Any initial value
     /\ lockA = [s \in Stores |-> FALSE]
@@ -88,7 +92,7 @@ SendLockReq(s) ==
     /\ coordPhase \in {"idle", "preparing"}
     /\ messages' = messages \cup {LockReqMsg(s)}
     /\ coordPhase' = "preparing"
-    /\ UNCHANGED <<walCommitted, locksAcquired, renamesDone, storeVars>>
+    /\ UNCHANGED <<walCommitted, locksAcquired, renamesDone, unlocksAcked, storeVars>>
 
 \* Receive successful lock response
 RecvLockRespSuccess(s) ==
@@ -97,17 +101,17 @@ RecvLockRespSuccess(s) ==
     /\ s \notin locksAcquired
     /\ locksAcquired' = locksAcquired \cup {s}
     /\ messages' = messages \ {LockRespMsg(s, TRUE)}  \* Remove after processing
-    /\ UNCHANGED <<coordPhase, walCommitted, renamesDone, storeVars>>
+    /\ UNCHANGED <<coordPhase, walCommitted, renamesDone, unlocksAcked, storeVars>>
 
-\* Receive failed lock response -> abort
+\* Receive failed lock response -> enter cleanup phase
 RecvLockRespFailure(s) ==
     /\ coordPhase = "preparing"
     /\ LockRespMsg(s, FALSE) \in messages
-    /\ coordPhase' = "idle"
+    /\ coordPhase' = "cleanup"
     /\ locksAcquired' = {}
     /\ renamesDone' = {}
-    \* Remove processed message and send unlock to all stores (cleanup)
-    /\ messages' = (messages \ {LockRespMsg(s, FALSE)}) \cup {UnlockReqMsg(st) : st \in Stores}
+    /\ unlocksAcked' = {}
+    /\ messages' = messages \ {LockRespMsg(s, FALSE)}
     /\ UNCHANGED <<walCommitted, storeVars>>
 
 \* Decide to commit (all locks acquired)
@@ -116,7 +120,7 @@ DecideCommit ==
     /\ locksAcquired = Stores
     /\ walCommitted' = TRUE
     /\ coordPhase' = "committed"
-    /\ UNCHANGED <<locksAcquired, renamesDone, storeVars, messages>>
+    /\ UNCHANGED <<locksAcquired, renamesDone, unlocksAcked, storeVars, messages>>
 
 \* Send rename request to a store
 SendRenameReq(s) ==
@@ -124,31 +128,44 @@ SendRenameReq(s) ==
     /\ messages' = messages \cup {RenameReqMsg(s)}
     /\ UNCHANGED <<coordVars, storeVars>>
 
-\* Receive rename response
+\* Receive rename response - transition to cleanup when all renames done
 RecvRenameResp(s) ==
     /\ coordPhase = "committed"
     /\ RenameRespMsg(s) \in messages
     /\ s \notin renamesDone
     /\ renamesDone' = renamesDone \cup {s}
     /\ IF renamesDone' = Stores
-       THEN coordPhase' = "done"
+       THEN coordPhase' = "cleanup"  \* Go to cleanup to release locks
        ELSE coordPhase' = coordPhase
     /\ messages' = messages \ {RenameRespMsg(s)}  \* Remove after processing
-    /\ UNCHANGED <<walCommitted, locksAcquired, storeVars>>
+    /\ UNCHANGED <<walCommitted, locksAcquired, unlocksAcked, storeVars>>
 
-\* Send unlock request to a store (after done)
+\* Send unlock request to a store (during cleanup phase)
 SendUnlockReq(s) ==
-    /\ coordPhase = "done"
+    /\ coordPhase = "cleanup"
     /\ messages' = messages \cup {UnlockReqMsg(s)}
     /\ UNCHANGED <<coordVars, storeVars>>
+
+\* Receive unlock response - transition to done when all unlocks acknowledged
+RecvUnlockResp(s) ==
+    /\ coordPhase = "cleanup"
+    /\ UnlockRespMsg(s) \in messages
+    /\ s \notin unlocksAcked
+    /\ unlocksAcked' = unlocksAcked \cup {s}
+    /\ IF unlocksAcked' = Stores
+       THEN coordPhase' = "done"
+       ELSE coordPhase' = coordPhase
+    /\ messages' = messages \ {UnlockRespMsg(s)}  \* Remove after processing
+    /\ UNCHANGED <<walCommitted, locksAcquired, renamesDone, storeVars>>
 
 \* Coordinator crash - reset volatile state, keep WAL
 \* Transitions to "crashed" phase - must recover before starting new protocol
 CoordinatorCrash ==
-    /\ coordPhase \in {"preparing", "committed"}  \* Can crash during protocol
+    /\ coordPhase \in {"preparing", "committed", "cleanup"}  \* Can crash during protocol
     /\ coordPhase' = "crashed"
     /\ locksAcquired' = {}
     /\ renamesDone' = {}
+    /\ unlocksAcked' = {}
     /\ UNCHANGED <<walCommitted, storeVars, messages>>
 
 \* Coordinator recovery - must happen after crash before new protocol can start
@@ -201,12 +218,12 @@ HandleRenameReq(s) ==
                  /\ messages' = messages \ {RenameReqMsg(s)}  \* Still remove message
                  /\ UNCHANGED <<coordVars, storeVars>>
 
-\* Handle unlock request (remove message after processing)
+\* Handle unlock request (remove message after processing, send response)
 HandleUnlockReq(s) ==
     /\ UnlockReqMsg(s) \in messages
     /\ lockA' = [lockA EXCEPT ![s] = FALSE]
     /\ lockAprime' = [lockAprime EXCEPT ![s] = FALSE]
-    /\ messages' = messages \ {UnlockReqMsg(s)}  \* Remove after processing
+    /\ messages' = (messages \ {UnlockReqMsg(s)}) \cup {UnlockRespMsg(s)}
     /\ UNCHANGED <<coordVars, storeKey, storeValue>>
 
 (***************************************************************************)

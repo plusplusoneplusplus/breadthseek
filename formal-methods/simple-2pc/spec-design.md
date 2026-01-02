@@ -33,12 +33,13 @@ This specification models a 2PC-style protocol for atomically renaming a key (`A
 
 | Variable | Type | Durable | Description |
 |----------|------|---------|-------------|
-| `coordPhase` | `{idle, preparing, committed, done}` | No | Current phase of the protocol |
+| `coordPhase` | `{idle, preparing, committed, cleanup, done}` | No | Current phase of the protocol |
 | `walCommitted` | `BOOLEAN` | **Yes** | Whether COMMIT is recorded in WAL (survives crash) |
 | `locksAcquired` | `SUBSET Stores` | No | Stores that have responded success to `LockReq` |
 | `renamesDone` | `SUBSET Stores` | No | Stores that have responded to `RenameReq` |
+| `unlocksAcked` | `SUBSET Stores` | No | Stores that have responded to `UnlockReq` |
 
-> **Crash behavior**: On crash, `coordPhase` resets to `idle`, and `locksAcquired`/`renamesDone` reset to `{}`. Only `walCommitted` persists.
+> **Crash behavior**: On crash, `coordPhase` resets to `idle`, and `locksAcquired`/`renamesDone`/`unlocksAcked` reset to `{}`. Only `walCommitted` persists.
 
 ### KV Store State (per store `s`)
 
@@ -68,6 +69,7 @@ This specification models a 2PC-style protocol for atomically renaming a key (`A
 | `RenameReq` | `type, store` | Request to rename `A` → `A'` |
 | `RenameResp` | `type, store` | Confirmation of rename |
 | `UnlockReq` | `type, store` | Request to release locks |
+| `UnlockResp` | `type, store` | Confirmation of unlock |
 
 ---
 
@@ -82,9 +84,10 @@ This specification models a 2PC-style protocol for atomically renaming a key (`A
 | `DecideCommit` | `coordPhase = preparing`, `locksAcquired = Stores` | Set `walCommitted = TRUE`, `coordPhase = committed` |
 | `SendRenameReq(s)` | `coordPhase = committed` | Add `RenameReq(s)` to messages |
 | `RecvRenameResp(s)` | `RenameResp(s)` in messages, `coordPhase = committed` | See "Handling `RenameResp`" below |
-| `SendUnlockReq(s)` | `coordPhase = done` | Add `UnlockReq(s)` to messages |
-| `Abort` | `coordPhase = preparing`, received `LockResp(_, FALSE)` | Set `coordPhase = idle`; send `UnlockReq` to all stores |
-| `Crash` | `coordPhase ≠ idle` | Reset volatile state (see crash behavior above) |
+| `SendUnlockReq(s)` | `coordPhase = cleanup` | Add `UnlockReq(s)` to messages |
+| `RecvUnlockResp(s)` | `UnlockResp(s)` in messages, `coordPhase = cleanup` | See "Handling `UnlockResp`" below |
+| `Abort` | `coordPhase = preparing`, received `LockResp(_, FALSE)` | Set `coordPhase = cleanup` |
+| `Crash` | `coordPhase ∉ {idle, done}` | Reset volatile state (see crash behavior above) |
 | `Recover` | `coordPhase = idle` (after crash) | See "Recovery" section |
 
 #### Handling `LockResp` (with duplicate detection)
@@ -112,6 +115,19 @@ RecvRenameResp(s):
     else:
         renamesDone = renamesDone ∪ {s}
         if renamesDone = Stores:
+            coordPhase = cleanup  \* Go to cleanup to release locks
+```
+
+#### Handling `UnlockResp` (with duplicate detection)
+
+```
+RecvUnlockResp(s):
+    if s ∈ unlocksAcked:
+        \* Duplicate response — ignore
+        skip
+    else:
+        unlocksAcked = unlocksAcked ∪ {s}
+        if unlocksAcked = Stores:
             coordPhase = done
 ```
 
@@ -123,7 +139,7 @@ All handlers are **idempotent** to handle message duplication:
 |--------|----------|
 | `HandleLockReq(s)` | See detailed logic below |
 | `HandleRenameReq(s)` | See detailed logic below |
-| `HandleUnlockReq(s)` | Release locks if held; no-op otherwise; no response |
+| `HandleUnlockReq(s)` | Release locks if held; no-op otherwise; always send `UnlockResp` |
 
 #### Handling `LockReq` (idempotent)
 
@@ -164,7 +180,7 @@ HandleRenameReq(s):
 HandleUnlockReq(s):
     lockA[s] = FALSE
     lockAprime[s] = FALSE
-    \* No response — fire and forget
+    send UnlockResp(s)
 ```
 
 ### Environment Actions
@@ -176,7 +192,7 @@ HandleUnlockReq(s):
 
 ---
 
-## Protocol Flow (Happy Path)
+## Protocol Flow (Success Path)
 
 ```
 ┌─────────────┐                    ┌─────────┐  ┌─────────┐
@@ -197,12 +213,50 @@ HandleUnlockReq(s):
        │<─── RenameResp ────────────────│            │
        │<─── RenameResp ─────────────────────────────│
        │                                │            │
+       │  [Enter CLEANUP phase]         │            │
+       │                                │            │
        │──── UnlockReq ────────────────>│            │
        │──── UnlockReq ─────────────────────────────>│
        │                                │            │
+       │<─── UnlockResp ────────────────│            │
+       │<─── UnlockResp ─────────────────────────────│
+       │                                │            │
+       │  [All unlocks confirmed]       │            │
+       │                                │            │
        ▼                                ▼            ▼
     [DONE]                          [A' held]    [A' held]
+   (walCommitted)                   (unlocked)   (unlocked)
 ```
+
+## Protocol Flow (Abort Path)
+
+```
+┌─────────────┐                    ┌─────────┐  ┌─────────┐
+│ Coordinator │                    │ Store 1 │  │ Store 2 │
+└──────┬──────┘                    └────┬────┘  └────┬────┘
+       │                                │            │
+       │──── LockReq ──────────────────>│            │
+       │──── LockReq ───────────────────────────────>│
+       │                                │            │
+       │<─── LockResp(success) ─────────│            │
+       │<─── LockResp(FAIL) ─────────────────────────│
+       │                                │            │
+       │  [Enter CLEANUP phase]         │            │
+       │                                │            │
+       │──── UnlockReq ────────────────>│            │
+       │──── UnlockReq ─────────────────────────────>│
+       │                                │            │
+       │<─── UnlockResp ────────────────│            │
+       │<─── UnlockResp ─────────────────────────────│
+       │                                │            │
+       │  [All unlocks confirmed]       │            │
+       │                                │            │
+       ▼                                ▼            ▼
+    [DONE]                          [A held]     [A held]
+   (~walCommitted)                  (unlocked)   (unlocked)
+```
+
+> **Note:** Both paths use the same `cleanup` → `done` transition. The coordinator waits for all `UnlockResp` before transitioning to `done`, ensuring locks are fully released. The outcome differs based on `walCommitted`: success path has all stores at `A'`, abort path has all stores at `A`.
 
 ---
 
@@ -212,11 +266,11 @@ When coordinator recovers (`coordPhase = idle` after crash):
 
 | WAL State | Recovery Action |
 |-----------|-----------------|
-| `walCommitted = FALSE` | Send `UnlockReq` to all stores (safe cleanup) |
+| `walCommitted = FALSE` | Set `coordPhase = cleanup`; send `UnlockReq` to all stores |
 | `walCommitted = TRUE` | Set `coordPhase = committed`; resend `RenameReq` to all stores |
 
 > **Why this works**:
-> - If not committed: Some stores may have locks, some may not. Sending `UnlockReq` to all is safe (idempotent).
+> - If not committed: Some stores may have locks, some may not. Entering `cleanup` phase and sending `UnlockReq` to all is safe (idempotent). Coordinator collects `UnlockResp` and transitions to `done` when all stores acknowledge.
 > - If committed: Some stores may have renamed, some may not. Resending `RenameReq` to all is safe (idempotent). Coordinator rebuilds `renamesDone` from responses.
 
 ---
@@ -227,9 +281,10 @@ When coordinator recovers (`coordPhase = idle` after crash):
 |-----------|---------|-------------------|
 | **KV Store** | `LockReq` | Already locked → respond success |
 | **KV Store** | `RenameReq` | Already `A'` → respond success |
-| **KV Store** | `UnlockReq` | Not locked → no-op |
+| **KV Store** | `UnlockReq` | Not locked → no-op, always respond |
 | **Coordinator** | `LockResp` | `s ∈ locksAcquired` → ignore |
 | **Coordinator** | `RenameResp` | `s ∈ renamesDone` → ignore |
+| **Coordinator** | `UnlockResp` | `s ∈ unlocksAcked` → ignore |
 
 ---
 
@@ -296,30 +351,22 @@ Liveness requires the following fairness assumptions:
 
 | Assumption | Type | Description |
 |------------|------|-------------|
-| **Coordinator send actions** | Weak (WF) | If sending is continuously enabled, it eventually executes |
-| **Coordinator receive actions** | Strong (SF) | If receiving is enabled infinitely often, it eventually executes |
+| **Coordinator send actions** | Weak (WF) | If sending (LockReq, RenameReq, UnlockReq) is continuously enabled, it eventually executes |
+| **Coordinator receive actions** | Strong (SF) | If receiving (LockResp, RenameResp, UnlockResp) is enabled infinitely often, it eventually executes |
 | **Store handlers** | Strong (SF) | If a handler is enabled infinitely often, it eventually executes |
 | **Coordinator recovery** | Weak (WF) | If the coordinator is crashed, it eventually recovers |
 
 > **Why Strong Fairness?** With message loss and retransmission, response messages may be repeatedly lost and re-added to the network. This means receive actions are *intermittently* enabled (not continuously). Strong fairness ensures that if an action is enabled infinitely often, it eventually fires — modeling that retransmission eventually succeeds.
 
-### 1. Eventually Stable
+### 1. Eventually Done
 
 ```tla
-EventuallyStable == <>(
-    \* Aborted/Not-started: clean initial state
-    (coordPhase = "idle" /\ ~walCommitted /\
-     \A s \in Stores: storeKey[s] = "A" /\ ~lockA[s] /\ ~lockAprime[s])
-  \/
-    \* Committed/Done: clean final state
-    (coordPhase = "done" /\ walCommitted /\
-     \A s \in Stores: storeKey[s] = "A'")
-)
+EventuallyDone == <>(coordPhase = "done")
 ```
 
-The system eventually reaches one of two terminal states:
-- **Not-started/Aborted:** No commit recorded, all stores at key `A`, no locks held
-- **Committed/Done:** Commit recorded, all stores renamed to `A'`, protocol complete
+The system eventually reaches the `done` terminal state. The outcome depends on `walCommitted`:
+- **Aborted (`~walCommitted`):** No commit recorded, all stores at key `A`, no locks held
+- **Committed (`walCommitted`):** Commit recorded, all stores renamed to `A'`
 
 ### 2. Committed Implies Eventually Done
 
