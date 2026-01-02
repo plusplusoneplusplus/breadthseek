@@ -29,30 +29,51 @@ pub type StoreId = nat;
 // MESSAGE TYPES
 // ============================================================
 
+/// Transaction ID type - used to prevent stale message interference after crash recovery
+pub type TxnId = nat;
+
 /// Protocol messages matching TLA+ spec:
-/// - LockReqMsg(s): Request to lock both A and A' at store s
-/// - LockRespMsg(s, ok): Response with success/failure
-/// - RenameReqMsg(s): Request to rename A -> A' at store s
-/// - RenameRespMsg(s): Confirmation of rename completion
-/// - UnlockReqMsg(s): Request to release locks at store s
+/// - LockReqMsg(s, txnId): Request to lock both A and A' at store s
+/// - LockRespMsg(s, ok, txnId): Response with success/failure
+/// - RenameReqMsg(s, txnId): Request to rename A -> A' at store s
+/// - RenameRespMsg(s, txnId): Confirmation of rename completion
+/// - UnlockReqMsg(s, txnId): Request to release locks at store s
+/// - UnlockRespMsg(s, txnId): Confirmation of unlock completion
+///
+/// All messages include txnId to prevent stale messages from old transactions
+/// being processed after coordinator crash/recovery.
 #[derive(PartialEq, Eq)]
 pub ghost enum Message {
-    LockReq { store: StoreId },
-    LockResp { store: StoreId, success: bool },
-    RenameReq { store: StoreId },
-    RenameResp { store: StoreId },
-    UnlockReq { store: StoreId },
+    LockReq { store: StoreId, txn_id: TxnId },
+    LockResp { store: StoreId, success: bool, txn_id: TxnId },
+    RenameReq { store: StoreId, txn_id: TxnId },
+    RenameResp { store: StoreId, txn_id: TxnId },
+    UnlockReq { store: StoreId, txn_id: TxnId },
+    UnlockResp { store: StoreId, txn_id: TxnId },
 }
 
 impl Message {
     /// Get the store this message is associated with
     pub open spec fn get_store(&self) -> StoreId {
         match *self {
-            Message::LockReq { store } => store,
+            Message::LockReq { store, .. } => store,
             Message::LockResp { store, .. } => store,
-            Message::RenameReq { store } => store,
-            Message::RenameResp { store } => store,
-            Message::UnlockReq { store } => store,
+            Message::RenameReq { store, .. } => store,
+            Message::RenameResp { store, .. } => store,
+            Message::UnlockReq { store, .. } => store,
+            Message::UnlockResp { store, .. } => store,
+        }
+    }
+
+    /// Get the transaction ID this message is associated with
+    pub open spec fn get_txn_id(&self) -> TxnId {
+        match *self {
+            Message::LockReq { txn_id, .. } => txn_id,
+            Message::LockResp { txn_id, .. } => txn_id,
+            Message::RenameReq { txn_id, .. } => txn_id,
+            Message::RenameResp { txn_id, .. } => txn_id,
+            Message::UnlockReq { txn_id, .. } => txn_id,
+            Message::UnlockResp { txn_id, .. } => txn_id,
         }
     }
 
@@ -71,6 +92,7 @@ impl Message {
         match *self {
             Message::LockResp { .. } => true,
             Message::RenameResp { .. } => true,
+            Message::UnlockResp { .. } => true,
             _ => false,
         }
     }
@@ -97,28 +119,33 @@ impl Message {
 // ============================================================
 
 /// Create a lock request message
-pub open spec fn lock_req_msg(store: StoreId) -> Message {
-    Message::LockReq { store }
+pub open spec fn lock_req_msg(store: StoreId, txn_id: TxnId) -> Message {
+    Message::LockReq { store, txn_id }
 }
 
 /// Create a lock response message
-pub open spec fn lock_resp_msg(store: StoreId, success: bool) -> Message {
-    Message::LockResp { store, success }
+pub open spec fn lock_resp_msg(store: StoreId, success: bool, txn_id: TxnId) -> Message {
+    Message::LockResp { store, success, txn_id }
 }
 
 /// Create a rename request message
-pub open spec fn rename_req_msg(store: StoreId) -> Message {
-    Message::RenameReq { store }
+pub open spec fn rename_req_msg(store: StoreId, txn_id: TxnId) -> Message {
+    Message::RenameReq { store, txn_id }
 }
 
 /// Create a rename response message
-pub open spec fn rename_resp_msg(store: StoreId) -> Message {
-    Message::RenameResp { store }
+pub open spec fn rename_resp_msg(store: StoreId, txn_id: TxnId) -> Message {
+    Message::RenameResp { store, txn_id }
 }
 
 /// Create an unlock request message
-pub open spec fn unlock_req_msg(store: StoreId) -> Message {
-    Message::UnlockReq { store }
+pub open spec fn unlock_req_msg(store: StoreId, txn_id: TxnId) -> Message {
+    Message::UnlockReq { store, txn_id }
+}
+
+/// Create an unlock response message
+pub open spec fn unlock_resp_msg(store: StoreId, txn_id: TxnId) -> Message {
+    Message::UnlockResp { store, txn_id }
 }
 
 // ============================================================
@@ -157,34 +184,39 @@ impl NetworkSpec {
         self.messages =~= Multiset::empty()
     }
 
-    /// Check if there's a lock request for a store
-    pub open spec fn has_lock_req(&self, store: StoreId) -> bool {
-        self.contains(lock_req_msg(store))
+    /// Check if there's a lock request for a store with specific txn_id
+    pub open spec fn has_lock_req(&self, store: StoreId, txn_id: TxnId) -> bool {
+        self.contains(lock_req_msg(store, txn_id))
     }
 
-    /// Check if there's a successful lock response for a store
-    pub open spec fn has_lock_resp_success(&self, store: StoreId) -> bool {
-        self.contains(lock_resp_msg(store, true))
+    /// Check if there's a successful lock response for a store with specific txn_id
+    pub open spec fn has_lock_resp_success(&self, store: StoreId, txn_id: TxnId) -> bool {
+        self.contains(lock_resp_msg(store, true, txn_id))
     }
 
-    /// Check if there's a failed lock response for a store
-    pub open spec fn has_lock_resp_failure(&self, store: StoreId) -> bool {
-        self.contains(lock_resp_msg(store, false))
+    /// Check if there's a failed lock response for a store with specific txn_id
+    pub open spec fn has_lock_resp_failure(&self, store: StoreId, txn_id: TxnId) -> bool {
+        self.contains(lock_resp_msg(store, false, txn_id))
     }
 
-    /// Check if there's a rename request for a store
-    pub open spec fn has_rename_req(&self, store: StoreId) -> bool {
-        self.contains(rename_req_msg(store))
+    /// Check if there's a rename request for a store with specific txn_id
+    pub open spec fn has_rename_req(&self, store: StoreId, txn_id: TxnId) -> bool {
+        self.contains(rename_req_msg(store, txn_id))
     }
 
-    /// Check if there's a rename response for a store
-    pub open spec fn has_rename_resp(&self, store: StoreId) -> bool {
-        self.contains(rename_resp_msg(store))
+    /// Check if there's a rename response for a store with specific txn_id
+    pub open spec fn has_rename_resp(&self, store: StoreId, txn_id: TxnId) -> bool {
+        self.contains(rename_resp_msg(store, txn_id))
     }
 
-    /// Check if there's an unlock request for a store
-    pub open spec fn has_unlock_req(&self, store: StoreId) -> bool {
-        self.contains(unlock_req_msg(store))
+    /// Check if there's an unlock request for a store with specific txn_id
+    pub open spec fn has_unlock_req(&self, store: StoreId, txn_id: TxnId) -> bool {
+        self.contains(unlock_req_msg(store, txn_id))
+    }
+
+    /// Check if there's an unlock response for a store with specific txn_id
+    pub open spec fn has_unlock_resp(&self, store: StoreId, txn_id: TxnId) -> bool {
+        self.contains(unlock_resp_msg(store, txn_id))
     }
 
     // ============================================================
@@ -336,29 +368,46 @@ impl NetworkSpec {
     {
     }
 
-    /// Different message types are distinct
-    pub proof fn lemma_message_types_distinct(store: StoreId)
+    /// Different message types are distinct (with same store and txn_id)
+    pub proof fn lemma_message_types_distinct(store: StoreId, txn_id: TxnId)
         ensures
-            lock_req_msg(store) != lock_resp_msg(store, true),
-            lock_req_msg(store) != lock_resp_msg(store, false),
-            lock_req_msg(store) != rename_req_msg(store),
-            lock_req_msg(store) != rename_resp_msg(store),
-            lock_req_msg(store) != unlock_req_msg(store),
-            lock_resp_msg(store, true) != lock_resp_msg(store, false),
-            rename_req_msg(store) != rename_resp_msg(store),
+            lock_req_msg(store, txn_id) != lock_resp_msg(store, true, txn_id),
+            lock_req_msg(store, txn_id) != lock_resp_msg(store, false, txn_id),
+            lock_req_msg(store, txn_id) != rename_req_msg(store, txn_id),
+            lock_req_msg(store, txn_id) != rename_resp_msg(store, txn_id),
+            lock_req_msg(store, txn_id) != unlock_req_msg(store, txn_id),
+            lock_req_msg(store, txn_id) != unlock_resp_msg(store, txn_id),
+            lock_resp_msg(store, true, txn_id) != lock_resp_msg(store, false, txn_id),
+            rename_req_msg(store, txn_id) != rename_resp_msg(store, txn_id),
+            unlock_req_msg(store, txn_id) != unlock_resp_msg(store, txn_id),
     {
     }
 
-    /// Messages for different stores are distinct
-    pub proof fn lemma_different_stores_distinct(s1: StoreId, s2: StoreId)
+    /// Messages for different stores are distinct (with same txn_id)
+    pub proof fn lemma_different_stores_distinct(s1: StoreId, s2: StoreId, txn_id: TxnId)
         requires
             s1 != s2
         ensures
-            lock_req_msg(s1) != lock_req_msg(s2),
-            lock_resp_msg(s1, true) != lock_resp_msg(s2, true),
-            rename_req_msg(s1) != rename_req_msg(s2),
-            rename_resp_msg(s1) != rename_resp_msg(s2),
-            unlock_req_msg(s1) != unlock_req_msg(s2),
+            lock_req_msg(s1, txn_id) != lock_req_msg(s2, txn_id),
+            lock_resp_msg(s1, true, txn_id) != lock_resp_msg(s2, true, txn_id),
+            rename_req_msg(s1, txn_id) != rename_req_msg(s2, txn_id),
+            rename_resp_msg(s1, txn_id) != rename_resp_msg(s2, txn_id),
+            unlock_req_msg(s1, txn_id) != unlock_req_msg(s2, txn_id),
+            unlock_resp_msg(s1, txn_id) != unlock_resp_msg(s2, txn_id),
+    {
+    }
+
+    /// Messages with different txn_ids are distinct (same store, same type)
+    pub proof fn lemma_different_txn_ids_distinct(store: StoreId, t1: TxnId, t2: TxnId)
+        requires
+            t1 != t2
+        ensures
+            lock_req_msg(store, t1) != lock_req_msg(store, t2),
+            lock_resp_msg(store, true, t1) != lock_resp_msg(store, true, t2),
+            rename_req_msg(store, t1) != rename_req_msg(store, t2),
+            rename_resp_msg(store, t1) != rename_resp_msg(store, t2),
+            unlock_req_msg(store, t1) != unlock_req_msg(store, t2),
+            unlock_resp_msg(store, t1) != unlock_resp_msg(store, t2),
     {
     }
 }
@@ -371,18 +420,23 @@ impl NetworkSpec {
 mod tests {
     use super::*;
 
+    // Default txn_id for tests
+    spec fn default_txn_id() -> TxnId { 1 }
+
     /// Test: Empty network contains no messages
     proof fn test_empty_network() {
         let net = NetworkSpec::empty();
+        let txn_id = default_txn_id();
         assert(net.is_empty());
-        assert(!net.contains(lock_req_msg(0)));
-        assert(net.count(lock_req_msg(0)) == 0);
+        assert(!net.contains(lock_req_msg(0, txn_id)));
+        assert(net.count(lock_req_msg(0, txn_id)) == 0);
     }
 
     /// Test: Send adds one copy to network
     proof fn test_send_message() {
         let net = NetworkSpec::empty();
-        let msg = lock_req_msg(1);
+        let txn_id = default_txn_id();
+        let msg = lock_req_msg(1, txn_id);
 
         let net2 = net.send(msg);
 
@@ -394,7 +448,8 @@ mod tests {
     /// Test: Send is NOT idempotent - sends accumulate
     proof fn test_send_not_idempotent() {
         let net = NetworkSpec::empty();
-        let msg = lock_req_msg(1);
+        let txn_id = default_txn_id();
+        let msg = lock_req_msg(1, txn_id);
 
         let net1 = net.send(msg);
         let net2 = net1.send(msg);
@@ -408,8 +463,9 @@ mod tests {
 
     /// Test: Lose removes one copy
     proof fn test_lose_one_copy() {
-        let net = NetworkSpec::empty().send(lock_req_msg(1)).send(lock_req_msg(1));
-        let msg = lock_req_msg(1);
+        let txn_id = default_txn_id();
+        let net = NetworkSpec::empty().send(lock_req_msg(1, txn_id)).send(lock_req_msg(1, txn_id));
+        let msg = lock_req_msg(1, txn_id);
 
         assert(net.count(msg) == 2);
 
@@ -423,8 +479,9 @@ mod tests {
 
     /// Test: Lose removes last copy
     proof fn test_lose_last_copy() {
-        let net = NetworkSpec::empty().send(lock_req_msg(1));
-        let msg = lock_req_msg(1);
+        let txn_id = default_txn_id();
+        let net = NetworkSpec::empty().send(lock_req_msg(1, txn_id));
+        let msg = lock_req_msg(1, txn_id);
 
         assert(net.count(msg) == 1);
 
@@ -438,8 +495,9 @@ mod tests {
     /// Test: Send preserves other messages
     proof fn test_send_preserves_others() {
         let net = NetworkSpec::empty();
-        let msg1 = lock_req_msg(1);
-        let msg2 = lock_req_msg(2);
+        let txn_id = default_txn_id();
+        let msg1 = lock_req_msg(1, txn_id);
+        let msg2 = lock_req_msg(2, txn_id);
 
         let net1 = net.send(msg1);
         let net2 = net1.send(msg2);
@@ -451,9 +509,10 @@ mod tests {
 
     /// Test: Lose preserves other messages
     proof fn test_lose_preserves_others() {
-        let net = NetworkSpec::empty().send(lock_req_msg(1)).send(lock_req_msg(2));
-        let msg1 = lock_req_msg(1);
-        let msg2 = lock_req_msg(2);
+        let txn_id = default_txn_id();
+        let net = NetworkSpec::empty().send(lock_req_msg(1, txn_id)).send(lock_req_msg(2, txn_id));
+        let msg1 = lock_req_msg(1, txn_id);
+        let msg2 = lock_req_msg(2, txn_id);
 
         let net2 = net.lose(msg1);
 
@@ -464,12 +523,14 @@ mod tests {
 
     /// Test: Message type predicates
     proof fn test_message_predicates() {
-        let lock_req = lock_req_msg(1);
-        let lock_resp_ok = lock_resp_msg(1, true);
-        let lock_resp_fail = lock_resp_msg(1, false);
-        let rename_req = rename_req_msg(1);
-        let rename_resp = rename_resp_msg(1);
-        let unlock_req = unlock_req_msg(1);
+        let txn_id = default_txn_id();
+        let lock_req = lock_req_msg(1, txn_id);
+        let lock_resp_ok = lock_resp_msg(1, true, txn_id);
+        let lock_resp_fail = lock_resp_msg(1, false, txn_id);
+        let rename_req = rename_req_msg(1, txn_id);
+        let rename_resp = rename_resp_msg(1, txn_id);
+        let unlock_req = unlock_req_msg(1, txn_id);
+        let unlock_resp = unlock_resp_msg(1, txn_id);
 
         // Request/response classification
         assert(lock_req.is_request());
@@ -482,6 +543,10 @@ mod tests {
         assert(rename_resp.is_response());
 
         assert(unlock_req.is_request());
+        assert(!unlock_req.is_response());
+
+        assert(!unlock_resp.is_request());
+        assert(unlock_resp.is_response());
 
         // Lock response success/failure
         assert(lock_resp_ok.is_lock_success());
@@ -493,33 +558,52 @@ mod tests {
 
     /// Test: Store accessor
     proof fn test_get_store() {
-        assert(lock_req_msg(5).get_store() == 5);
-        assert(lock_resp_msg(3, true).get_store() == 3);
-        assert(rename_req_msg(7).get_store() == 7);
-        assert(rename_resp_msg(2).get_store() == 2);
-        assert(unlock_req_msg(9).get_store() == 9);
+        let txn_id = default_txn_id();
+        assert(lock_req_msg(5, txn_id).get_store() == 5);
+        assert(lock_resp_msg(3, true, txn_id).get_store() == 3);
+        assert(rename_req_msg(7, txn_id).get_store() == 7);
+        assert(rename_resp_msg(2, txn_id).get_store() == 2);
+        assert(unlock_req_msg(9, txn_id).get_store() == 9);
+        assert(unlock_resp_msg(4, txn_id).get_store() == 4);
+    }
+
+    /// Test: TxnId accessor
+    proof fn test_get_txn_id() {
+        let txn_id: TxnId = 42;
+        assert(lock_req_msg(5, txn_id).get_txn_id() == 42);
+        assert(lock_resp_msg(3, true, txn_id).get_txn_id() == 42);
+        assert(rename_req_msg(7, txn_id).get_txn_id() == 42);
+        assert(rename_resp_msg(2, txn_id).get_txn_id() == 42);
+        assert(unlock_req_msg(9, txn_id).get_txn_id() == 42);
+        assert(unlock_resp_msg(4, txn_id).get_txn_id() == 42);
     }
 
     /// Test: Convenience methods
     proof fn test_convenience_methods() {
+        let txn_id = default_txn_id();
         let net = NetworkSpec::empty()
-            .send(lock_req_msg(1))
-            .send(lock_resp_msg(1, true))
-            .send(rename_req_msg(2));
+            .send(lock_req_msg(1, txn_id))
+            .send(lock_resp_msg(1, true, txn_id))
+            .send(rename_req_msg(2, txn_id))
+            .send(unlock_resp_msg(3, txn_id));
 
-        assert(net.has_lock_req(1));
-        assert(!net.has_lock_req(2));
+        assert(net.has_lock_req(1, txn_id));
+        assert(!net.has_lock_req(2, txn_id));
 
-        assert(net.has_lock_resp_success(1));
-        assert(!net.has_lock_resp_failure(1));
+        assert(net.has_lock_resp_success(1, txn_id));
+        assert(!net.has_lock_resp_failure(1, txn_id));
 
-        assert(net.has_rename_req(2));
-        assert(!net.has_rename_resp(2));
+        assert(net.has_rename_req(2, txn_id));
+        assert(!net.has_rename_resp(2, txn_id));
+
+        assert(net.has_unlock_resp(3, txn_id));
+        assert(!net.has_unlock_req(3, txn_id));
     }
 
     /// Test: Duplicate adds another copy
     proof fn test_duplicate() {
-        let msg = lock_req_msg(1);
+        let txn_id = default_txn_id();
+        let msg = lock_req_msg(1, txn_id);
         let net = NetworkSpec::empty().send(msg);
 
         assert(net.count(msg) == 1);
@@ -532,25 +616,30 @@ mod tests {
 
     /// Test: Different message types are distinct
     proof fn test_message_distinctness() {
-        NetworkSpec::lemma_message_types_distinct(1);
+        let txn_id = default_txn_id();
+        NetworkSpec::lemma_message_types_distinct(1, txn_id);
 
-        assert(lock_req_msg(1) != lock_resp_msg(1, true));
-        assert(lock_req_msg(1) != rename_req_msg(1));
-        assert(lock_resp_msg(1, true) != lock_resp_msg(1, false));
+        assert(lock_req_msg(1, txn_id) != lock_resp_msg(1, true, txn_id));
+        assert(lock_req_msg(1, txn_id) != rename_req_msg(1, txn_id));
+        assert(lock_resp_msg(1, true, txn_id) != lock_resp_msg(1, false, txn_id));
+        assert(unlock_req_msg(1, txn_id) != unlock_resp_msg(1, txn_id));
     }
 
     /// Test: Messages for different stores are distinct
     proof fn test_different_stores() {
-        NetworkSpec::lemma_different_stores_distinct(1, 2);
+        let txn_id = default_txn_id();
+        NetworkSpec::lemma_different_stores_distinct(1, 2, txn_id);
 
-        assert(lock_req_msg(1) != lock_req_msg(2));
-        assert(rename_resp_msg(1) != rename_resp_msg(2));
+        assert(lock_req_msg(1, txn_id) != lock_req_msg(2, txn_id));
+        assert(rename_resp_msg(1, txn_id) != rename_resp_msg(2, txn_id));
+        assert(unlock_resp_msg(1, txn_id) != unlock_resp_msg(2, txn_id));
     }
 
     /// Test: Realistic duplication scenario
     /// Network duplicates a message, one copy is lost, receiver still gets it
     proof fn test_duplication_then_loss() {
-        let msg = lock_req_msg(1);
+        let txn_id = default_txn_id();
+        let msg = lock_req_msg(1, txn_id);
 
         // Send message
         let net1 = NetworkSpec::empty().send(msg);
@@ -566,6 +655,40 @@ mod tests {
 
         // Message still available for receiver
         assert(net3.contains(msg));
+    }
+
+    /// Test: Messages with different txn_ids are distinct
+    proof fn test_different_txn_ids() {
+        let txn1: TxnId = 1;
+        let txn2: TxnId = 2;
+
+        NetworkSpec::lemma_different_txn_ids_distinct(1, txn1, txn2);
+
+        assert(lock_req_msg(1, txn1) != lock_req_msg(1, txn2));
+        assert(lock_resp_msg(1, true, txn1) != lock_resp_msg(1, true, txn2));
+        assert(unlock_resp_msg(1, txn1) != unlock_resp_msg(1, txn2));
+    }
+
+    /// Test: Stale message scenario
+    /// Old txn_id message is different from new txn_id message
+    proof fn test_stale_vs_new_message() {
+        let old_txn: TxnId = 1;
+        let new_txn: TxnId = 2;
+
+        let old_lock_req = lock_req_msg(1, old_txn);
+        let new_lock_req = lock_req_msg(1, new_txn);
+
+        // Same store, same message type, but different txn_ids
+        assert(old_lock_req != new_lock_req);
+        assert(old_lock_req.get_store() == new_lock_req.get_store());
+        assert(old_lock_req.get_txn_id() < new_lock_req.get_txn_id());
+
+        // Network can contain both
+        let net = NetworkSpec::empty().send(old_lock_req).send(new_lock_req);
+        assert(net.contains(old_lock_req));
+        assert(net.contains(new_lock_req));
+        assert(net.count(old_lock_req) == 1);
+        assert(net.count(new_lock_req) == 1);
     }
 }
 
