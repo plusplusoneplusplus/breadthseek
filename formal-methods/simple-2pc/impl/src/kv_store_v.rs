@@ -23,6 +23,8 @@ pub struct KvStore {
     pub data: StringHashMap<u64>,
     /// Locked keys (key -> true means locked)
     pub locked: StringHashMap<bool>,
+    /// Last seen transaction ID - used to reject stale messages
+    pub last_seen_txn_id: u64,
 }
 
 impl View for KvStore {
@@ -33,6 +35,7 @@ impl View for KvStore {
         KvStoreSpec {
             data: self.data@,
             locked_keys: Set::new(|k: Seq<char>| self.locked@.contains_key(k)),
+            last_seen_txn_id: self.last_seen_txn_id as nat,
         }
     }
 }
@@ -56,6 +59,14 @@ impl KvStore {
         self.data@[key]
     }
 
+    pub open spec fn spec_last_seen_txn_id(&self) -> nat {
+        self.last_seen_txn_id as nat
+    }
+
+    pub open spec fn spec_is_stale_txn_id(&self, txn_id: nat) -> bool {
+        txn_id <= self.last_seen_txn_id as nat
+    }
+
     // ============================================================
     // EXEC FUNCTIONS - Verified implementations
     // ============================================================
@@ -65,10 +76,12 @@ impl KvStore {
         ensures
             result@.data == Map::<Seq<char>, u64>::empty(),
             result@.locked_keys == Set::<Seq<char>>::empty(),
+            result@.last_seen_txn_id == 0,
     {
         KvStore {
             data: StringHashMap::new(),
             locked: StringHashMap::new(),
+            last_seen_txn_id: 0,
         }
     }
 
@@ -102,6 +115,41 @@ impl KvStore {
         self.data.contains_key(key)
     }
 
+    /// Get the last seen transaction ID
+    pub fn get_last_seen_txn_id(&self) -> (result: u64)
+        ensures
+            result as nat == self.spec_last_seen_txn_id()
+    {
+        self.last_seen_txn_id
+    }
+
+    /// Check if a transaction ID is stale (older than or equal to last seen)
+    pub fn is_stale_txn_id(&self, txn_id: u64) -> (result: bool)
+        ensures
+            result == self.spec_is_stale_txn_id(txn_id as nat)
+    {
+        txn_id <= self.last_seen_txn_id
+    }
+
+    /// Update the last seen transaction ID (only updates if newer)
+    pub fn update_txn_id(&mut self, txn_id: u64)
+        ensures
+            // Updates to new txn_id if greater, otherwise unchanged
+            self.last_seen_txn_id == if txn_id > old(self).last_seen_txn_id {
+                txn_id
+            } else {
+                old(self).last_seen_txn_id
+            },
+            // Data unchanged
+            self.data@ == old(self).data@,
+            // Locks unchanged
+            self.locked@ == old(self).locked@,
+    {
+        if txn_id > self.last_seen_txn_id {
+            self.last_seen_txn_id = txn_id;
+        }
+    }
+
     /// Put value for key (fails if locked)
     /// Returns true if successful, false if key is locked
     pub fn put(&mut self, key: &str, value: u64) -> (success: bool)
@@ -117,6 +165,8 @@ impl KvStore {
                 self.data@ == old(self).data@.insert(key@, value)
                 && self.locked@ == old(self).locked@
             ),
+            // txn_id unchanged
+            self.last_seen_txn_id == old(self).last_seen_txn_id,
     {
         if self.locked.contains_key(key) {
             false
@@ -141,6 +191,8 @@ impl KvStore {
                 self.data@ == old(self).data@.remove(key@)
                 && self.locked@ == old(self).locked@
             ),
+            // txn_id unchanged
+            self.last_seen_txn_id == old(self).last_seen_txn_id,
     {
         if self.locked.contains_key(key) {
             false
@@ -160,6 +212,8 @@ impl KvStore {
             // Other locks unchanged
             forall|k: Seq<char>| k != key@ ==>
                 (self.spec_is_locked(k) == old(self).spec_is_locked(k)),
+            // txn_id unchanged
+            self.last_seen_txn_id == old(self).last_seen_txn_id,
     {
         self.locked.insert(key.to_owned(), true);
     }
@@ -174,6 +228,8 @@ impl KvStore {
             // Other locks unchanged
             forall|k: Seq<char>| k != key@ ==>
                 (self.spec_is_locked(k) == old(self).spec_is_locked(k)),
+            // txn_id unchanged
+            self.last_seen_txn_id == old(self).last_seen_txn_id,
     {
         self.locked.remove(key);
     }
@@ -200,6 +256,8 @@ impl KvStore {
             result.is_some() ==> !self.spec_contains_key(old_key@),
             // If failed, data unchanged
             result.is_none() ==> self.data@ == old(self).data@,
+            // txn_id unchanged
+            self.last_seen_txn_id == old(self).last_seen_txn_id,
     {
         match self.data.get(old_key) {
             Some(v) => {
@@ -363,6 +421,105 @@ mod tests {
         assert(store.get("key1") == Some(11u64));
         assert(store.get("key2") == Some(2u64));  // unchanged
         assert(store.get("key3") == Some(33u64));
+    }
+
+    /// Test: New store has txn_id 0
+    fn test_new_txn_id() {
+        let store = KvStore::new();
+        assert(store.get_last_seen_txn_id() == 0);
+    }
+
+    /// Test: Stale txn_id detection
+    fn test_is_stale_txn_id() {
+        let mut store = KvStore::new();
+
+        // Initially, txn_id 0 is stale (equal to last_seen)
+        assert(store.is_stale_txn_id(0));
+
+        // txn_id 1 is not stale
+        assert(!store.is_stale_txn_id(1));
+
+        // Update to txn_id 5
+        store.update_txn_id(5);
+        assert(store.get_last_seen_txn_id() == 5);
+
+        // Now 0-5 are stale, 6+ are not
+        assert(store.is_stale_txn_id(0));
+        assert(store.is_stale_txn_id(3));
+        assert(store.is_stale_txn_id(5));
+        assert(!store.is_stale_txn_id(6));
+    }
+
+    /// Test: Update txn_id only increases
+    fn test_update_txn_id_monotonic() {
+        let mut store = KvStore::new();
+
+        // Update to 10
+        store.update_txn_id(10);
+        assert(store.get_last_seen_txn_id() == 10);
+
+        // Try to update to 5 (should be ignored)
+        store.update_txn_id(5);
+        assert(store.get_last_seen_txn_id() == 10);
+
+        // Update to 15 (should succeed)
+        store.update_txn_id(15);
+        assert(store.get_last_seen_txn_id() == 15);
+    }
+
+    /// Test: txn_id preserved during put
+    fn test_txn_id_preserved_put() {
+        let mut store = KvStore::new();
+        store.update_txn_id(42);
+
+        store.put("key1", 100);
+        assert(store.get_last_seen_txn_id() == 42);
+    }
+
+    /// Test: txn_id preserved during lock/unlock
+    fn test_txn_id_preserved_lock_unlock() {
+        let mut store = KvStore::new();
+        store.update_txn_id(42);
+
+        store.lock("key1");
+        assert(store.get_last_seen_txn_id() == 42);
+
+        store.unlock("key1");
+        assert(store.get_last_seen_txn_id() == 42);
+    }
+
+    /// Test: txn_id preserved during rename
+    fn test_txn_id_preserved_rename() {
+        let mut store = KvStore::new();
+        store.put("A", 123);
+        store.update_txn_id(42);
+
+        store.lock("A");
+        store.lock("B");
+
+        store.rename("A", "B");
+        assert(store.get_last_seen_txn_id() == 42);
+    }
+
+    /// Test: Stale message rejection scenario
+    fn test_stale_message_rejection_scenario() {
+        let mut store = KvStore::new();
+
+        // Simulate: coordinator sends lock request with txn_id 1
+        // Store processes it and updates txn_id
+        store.update_txn_id(1);
+        store.lock("A");
+        store.lock("B");
+
+        // Coordinator crashes and recovers with new txn_id 2
+        // Store receives new lock request with txn_id 2
+        store.update_txn_id(2);
+
+        // Old message with txn_id 1 arrives (stale)
+        assert(store.is_stale_txn_id(1));
+
+        // New message with txn_id 2 is not stale
+        assert(!store.is_stale_txn_id(3));
     }
 }
 

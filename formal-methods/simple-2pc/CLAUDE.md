@@ -1,0 +1,1 @@
+ Use `formal-methods/verus/cargo-verus verify` to verify the proof of impl. 

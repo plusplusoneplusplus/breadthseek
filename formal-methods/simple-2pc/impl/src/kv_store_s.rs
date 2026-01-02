@@ -21,6 +21,8 @@ pub ghost struct KvStoreSpec<V> {
     pub data: Map<Seq<char>, V>,
     /// Set of currently locked keys
     pub locked_keys: Set<Seq<char>>,
+    /// Last seen transaction ID - used to reject stale messages
+    pub last_seen_txn_id: nat,
 }
 
 impl<V> KvStoreSpec<V> {
@@ -31,6 +33,16 @@ impl<V> KvStoreSpec<V> {
     /// Check if a key is locked
     pub open spec fn is_locked(&self, key: Seq<char>) -> bool {
         self.locked_keys.contains(key)
+    }
+
+    /// Get the last seen transaction ID
+    pub open spec fn get_last_seen_txn_id(&self) -> nat {
+        self.last_seen_txn_id
+    }
+
+    /// Check if a transaction ID is stale (older than or equal to last seen)
+    pub open spec fn is_stale_txn_id(&self, txn_id: nat) -> bool {
+        txn_id <= self.last_seen_txn_id
     }
 
     /// Check if a key exists
@@ -54,6 +66,16 @@ impl<V> KvStoreSpec<V> {
         KvStoreSpec {
             data: Map::empty(),
             locked_keys: Set::empty(),
+            last_seen_txn_id: 0,
+        }
+    }
+
+    /// Update the last seen transaction ID
+    pub open spec fn update_txn_id(self, txn_id: nat) -> Self {
+        KvStoreSpec {
+            data: self.data,
+            locked_keys: self.locked_keys,
+            last_seen_txn_id: if txn_id > self.last_seen_txn_id { txn_id } else { self.last_seen_txn_id },
         }
     }
 
@@ -65,6 +87,7 @@ impl<V> KvStoreSpec<V> {
             KvStoreSpec {
                 data: self.data.insert(key, value),
                 locked_keys: self.locked_keys,
+                last_seen_txn_id: self.last_seen_txn_id,
             }
         }
     }
@@ -77,6 +100,7 @@ impl<V> KvStoreSpec<V> {
             KvStoreSpec {
                 data: self.data.remove(key),
                 locked_keys: self.locked_keys,
+                last_seen_txn_id: self.last_seen_txn_id,
             }
         }
     }
@@ -86,6 +110,7 @@ impl<V> KvStoreSpec<V> {
         KvStoreSpec {
             data: self.data,
             locked_keys: self.locked_keys.insert(key),
+            last_seen_txn_id: self.last_seen_txn_id,
         }
     }
 
@@ -94,6 +119,7 @@ impl<V> KvStoreSpec<V> {
         KvStoreSpec {
             data: self.data,
             locked_keys: self.locked_keys.remove(key),
+            last_seen_txn_id: self.last_seen_txn_id,
         }
     }
 
@@ -108,6 +134,7 @@ impl<V> KvStoreSpec<V> {
         KvStoreSpec {
             data: self.data.remove(old_key).insert(new_key, value),
             locked_keys: self.locked_keys,
+            last_seen_txn_id: self.last_seen_txn_id,
         }
     }
 
@@ -160,6 +187,43 @@ impl<V> KvStoreSpec<V> {
     pub proof fn lemma_unlock_preserves_data(self, key: Seq<char>)
         ensures
             self.unlock(key).data == self.data
+    {
+    }
+
+    /// Update txn_id preserves data and locks
+    pub proof fn lemma_update_txn_id_preserves_state(self, txn_id: nat)
+        ensures
+            self.update_txn_id(txn_id).data == self.data,
+            self.update_txn_id(txn_id).locked_keys == self.locked_keys,
+    {
+    }
+
+    /// Stale txn_id check is monotonic: once stale, always stale
+    pub proof fn lemma_stale_txn_id_monotonic(self, txn_id: nat, new_txn_id: nat)
+        requires
+            self.is_stale_txn_id(txn_id),
+            new_txn_id >= self.last_seen_txn_id,
+        ensures
+            self.update_txn_id(new_txn_id).is_stale_txn_id(txn_id),
+    {
+    }
+
+    /// Non-stale txn_id becomes the new last_seen after update
+    pub proof fn lemma_update_fresh_txn_id(self, txn_id: nat)
+        requires
+            !self.is_stale_txn_id(txn_id),
+        ensures
+            self.update_txn_id(txn_id).last_seen_txn_id == txn_id,
+    {
+    }
+
+    /// Rejecting stale messages is safe: txn_id tracking prevents stale interference
+    pub proof fn lemma_stale_rejection_safety(self, stale_txn_id: nat, current_txn_id: nat)
+        requires
+            self.last_seen_txn_id == current_txn_id,
+            stale_txn_id <= current_txn_id,
+        ensures
+            self.is_stale_txn_id(stale_txn_id),
     {
     }
 
