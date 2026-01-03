@@ -22,7 +22,7 @@ verus! {
 ///
 /// This is a regular (non-ghost) enum that can be used in both spec and exec contexts.
 /// No need for a separate ExecCoordPhase - this single enum serves both purposes.
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum CoordPhase {
     /// Initial state, not started
     Idle,
