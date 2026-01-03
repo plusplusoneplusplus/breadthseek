@@ -64,7 +64,7 @@ impl KvStore {
     }
 
     pub open spec fn spec_is_stale_txn_id(&self, txn_id: nat) -> bool {
-        txn_id <= self.last_seen_txn_id as nat
+        txn_id < self.last_seen_txn_id as nat
     }
 
     // ============================================================
@@ -128,7 +128,7 @@ impl KvStore {
         ensures
             result == self.spec_is_stale_txn_id(txn_id as nat)
     {
-        txn_id <= self.last_seen_txn_id
+        txn_id < self.last_seen_txn_id
     }
 
     /// Update the last seen transaction ID (only updates if newer)
@@ -433,8 +433,8 @@ mod tests {
     fn test_is_stale_txn_id() {
         let mut store = KvStore::new();
 
-        // Initially, txn_id 0 is stale (equal to last_seen)
-        assert(store.is_stale_txn_id(0));
+        // Initially, txn_id 0 is NOT stale (equality is allowed for duplicates)
+        assert(!store.is_stale_txn_id(0));
 
         // txn_id 1 is not stale
         assert(!store.is_stale_txn_id(1));
@@ -446,7 +446,7 @@ mod tests {
         // Now 0-5 are stale, 6+ are not
         assert(store.is_stale_txn_id(0));
         assert(store.is_stale_txn_id(3));
-        assert(store.is_stale_txn_id(5));
+        assert(!store.is_stale_txn_id(5));
         assert(!store.is_stale_txn_id(6));
     }
 

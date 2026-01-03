@@ -40,9 +40,12 @@ impl<V> KvStoreSpec<V> {
         self.last_seen_txn_id
     }
 
-    /// Check if a transaction ID is stale (older than or equal to last seen)
+    /// Check if a transaction ID is stale (strictly older than last seen)
+    ///
+    /// Note: equality is NOT stale, which allows idempotent re-processing of
+    /// duplicate messages for the same transaction.
     pub open spec fn is_stale_txn_id(&self, txn_id: nat) -> bool {
-        txn_id <= self.last_seen_txn_id
+        txn_id < self.last_seen_txn_id
     }
 
     /// Check if a key exists
@@ -221,7 +224,7 @@ impl<V> KvStoreSpec<V> {
     pub proof fn lemma_stale_rejection_safety(self, stale_txn_id: nat, current_txn_id: nat)
         requires
             self.last_seen_txn_id == current_txn_id,
-            stale_txn_id <= current_txn_id,
+            stale_txn_id < current_txn_id,
         ensures
             self.is_stale_txn_id(stale_txn_id),
     {

@@ -16,6 +16,7 @@ pub mod kv_store_v;
 pub mod network_s;
 pub mod coordinator_s;
 pub mod coordinator_v;
+pub mod system_s;
 
 // Re-export main types for convenience
 pub use kv_store_s::KvStoreSpec;
@@ -23,4 +24,4 @@ pub use kv_store_v::KvStore;
 pub use network_s::{Message, NetworkSpec, StoreId};
 pub use coordinator_s::{CoordPhase, CoordinatorSpec};
 pub use coordinator_v::Coordinator;
-
+pub use system_s::SystemSpec;
