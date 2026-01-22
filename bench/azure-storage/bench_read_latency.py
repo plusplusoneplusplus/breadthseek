@@ -6,14 +6,23 @@ Measures read latency for different blob sizes and read patterns.
 Uses random offsets and unique blob names to minimize cache effects.
 
 Usage:
+    # Set the SAS URL as an environment variable (optional)
+    export AZURE_STORAGE_SAS_URL="https://<account>.blob.core.windows.net/<container>?<sas_token>"
+    
     # Prepare test data (upload blobs of various sizes with unique names)
     python bench_read_latency.py prepare --sas-url "https://<account>.blob.core.windows.net/<container>?<sas_token>"
+    # Or if AZURE_STORAGE_SAS_URL is set:
+    python bench_read_latency.py prepare
 
     # Run benchmark (uses the manifest from prepare)
     python bench_read_latency.py run --sas-url "https://<account>.blob.core.windows.net/<container>?<sas_token>"
+    # Or if AZURE_STORAGE_SAS_URL is set:
+    python bench_read_latency.py run
 
     # Clean up test data
     python bench_read_latency.py cleanup --sas-url "https://<account>.blob.core.windows.net/<container>?<sas_token>"
+    # Or if AZURE_STORAGE_SAS_URL is set:
+    python bench_read_latency.py cleanup
 """
 
 import argparse
@@ -34,6 +43,9 @@ from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
 console = Console()
+
+# Environment variable for SAS URL
+ENV_SAS_URL = "AZURE_STORAGE_SAS_URL"
 
 # Benchmark configuration
 BLOB_PREFIX = "bench_latency_"
@@ -157,6 +169,11 @@ def parse_container_sas_url(sas_url: str) -> tuple[str, str, str]:
     sas_token = parsed.query
     
     return account_url, container_name, sas_token
+
+
+def get_sas_url_from_env() -> Optional[str]:
+    """Get SAS URL from environment variable if set."""
+    return os.environ.get(ENV_SAS_URL)
 
 
 def get_container_client(sas_url: str) -> ContainerClient:
@@ -521,16 +538,16 @@ Examples:
     prepare_parser = subparsers.add_parser("prepare", help="Upload test blobs with unique names")
     prepare_parser.add_argument(
         "--sas-url", 
-        required=True,
-        help="Container SAS URL (https://<account>.blob.core.windows.net/<container>?<sas_token>)"
+        required=False,
+        help=f"Container SAS URL (https://<account>.blob.core.windows.net/<container>?<sas_token>). If not provided, will use {ENV_SAS_URL} environment variable."
     )
     
     # Run command
     run_parser = subparsers.add_parser("run", help="Run the benchmark")
     run_parser.add_argument(
         "--sas-url",
-        required=True,
-        help="Container SAS URL"
+        required=False,
+        help=f"Container SAS URL. If not provided, will use {ENV_SAS_URL} environment variable."
     )
     run_parser.add_argument(
         "--iterations",
@@ -559,8 +576,8 @@ Examples:
     cleanup_parser = subparsers.add_parser("cleanup", help="Delete test blobs")
     cleanup_parser.add_argument(
         "--sas-url",
-        required=True,
-        help="Container SAS URL"
+        required=False,
+        help=f"Container SAS URL. If not provided, will use {ENV_SAS_URL} environment variable."
     )
     cleanup_parser.add_argument(
         "--all",
@@ -571,12 +588,19 @@ Examples:
     
     args = parser.parse_args()
     
+    # Get SAS URL from args or environment variable
+    sas_url = args.sas_url or get_sas_url_from_env()
+    if not sas_url:
+        console.print(f"[red]Error: SAS URL must be provided via --sas-url or {ENV_SAS_URL} environment variable[/red]")
+        parser.print_help()
+        return
+    
     if args.command == "prepare":
-        prepare_test_data(args.sas_url)
+        prepare_test_data(sas_url)
     
     elif args.command == "run":
         results = run_benchmark(
-            args.sas_url,
+            sas_url,
             iterations=args.iterations,
             blob_sizes=args.blob_sizes,
             read_sizes=args.read_sizes,
@@ -587,7 +611,7 @@ Examples:
             export_results_csv(results, args.output)
     
     elif args.command == "cleanup":
-        cleanup_test_data(args.sas_url, cleanup_all=args.cleanup_all)
+        cleanup_test_data(sas_url, cleanup_all=args.cleanup_all)
 
 
 if __name__ == "__main__":
