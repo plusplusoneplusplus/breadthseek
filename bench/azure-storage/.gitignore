@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# uv
+uv.lock
+
+# Benchmark outputs
+*.csv
+results/
+
+# Manifest (contains blob names from prepare)
+bench_manifest.json
