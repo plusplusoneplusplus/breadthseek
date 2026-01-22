@@ -50,21 +50,14 @@ ENV_SAS_URL = "AZURE_STORAGE_SAS_URL"
 # Benchmark configuration
 BLOB_PREFIX = "bench_latency_"
 MANIFEST_FILE = "bench_manifest.json"
-DEFAULT_ITERATIONS = 50
+DEFAULT_ITERATIONS = 1000
 WARMUP_ITERATIONS = 5
 
 # Blob sizes to test (in bytes)
 BLOB_SIZES = {
-    "1KB": 1 * 1024,
     "4KB": 4 * 1024,
-    "16KB": 16 * 1024,
-    "64KB": 64 * 1024,
-    "256KB": 256 * 1024,
     "1MB": 1 * 1024 * 1024,
     "4MB": 4 * 1024 * 1024,
-    "16MB": 16 * 1024 * 1024,
-    "64MB": 64 * 1024 * 1024,
-    "256MB": 256 * 1024 * 1024,
 }
 
 # Read sizes to test (in bytes)
@@ -466,17 +459,18 @@ def display_results(results: list[LatencyResult]) -> None:
     
     # Summary by read size
     console.print()
-    console.print("[bold]Summary by Read Size (mean latency across all blob sizes):[/bold]")
+    console.print("[bold]Summary by Read Size (q50 and q99 across all blob sizes):[/bold]")
     
     read_size_groups: dict[str, list[float]] = {}
     for result in results:
         if result.read_size not in read_size_groups:
             read_size_groups[result.read_size] = []
-        read_size_groups[result.read_size].append(result.mean_ms)
+        read_size_groups[result.read_size].extend(result.latencies_ms)
     
-    for read_size, means in sorted(read_size_groups.items(), key=lambda x: READ_SIZES.get(x[0], 0)):
-        avg_mean = statistics.mean(means)
-        console.print(f"  {read_size}: {avg_mean:.2f} ms")
+    for read_size, latencies in sorted(read_size_groups.items(), key=lambda x: READ_SIZES.get(x[0], 0)):
+        q50 = statistics.median(latencies)
+        q99 = statistics.quantiles(latencies, n=100)[98] if len(latencies) >= 100 else max(latencies)
+        console.print(f"  {read_size}: q50={q50:.2f} ms, q99={q99:.2f} ms")
 
 
 def export_results_csv(results: list[LatencyResult], output_path: str) -> None:
