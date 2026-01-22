@@ -316,6 +316,8 @@ def run_benchmark(
     """
     Run the read latency benchmark.
     
+    Automatically prepares test data if not already present.
+    
     Args:
         sas_url: Container SAS URL
         iterations: Number of iterations per test
@@ -327,10 +329,19 @@ def run_benchmark(
     """
     container_client = get_container_client(sas_url)
     
-    # Load manifest to get blob names
-    manifest = load_manifest()
-    run_id = manifest.get("_run_id", "unknown")
-    console.print(f"[dim]Using blobs from run: {run_id}[/dim]")
+    # Auto-prepare if manifest doesn't exist
+    try:
+        manifest = load_manifest()
+        run_id = manifest.get("_run_id", "unknown")
+        console.print(f"[dim]Using blobs from run: {run_id}[/dim]")
+    except FileNotFoundError:
+        console.print("[yellow]No test data found. Preparing automatically...[/yellow]")
+        console.print()
+        prepare_test_data(sas_url)
+        manifest = load_manifest()
+        run_id = manifest.get("_run_id", "unknown")
+        console.print()
+        console.print(f"[dim]Using blobs from run: {run_id}[/dim]")
     
     # Filter sizes if specified
     test_blob_sizes = {k: v for k, v in BLOB_SIZES.items() if blob_sizes is None or k in blob_sizes}
